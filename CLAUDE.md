@@ -4,56 +4,87 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**SAS2AST** is a Python library that parses SAS code (including macro expansion) into a typed Abstract Syntax Tree (AST) for automated migration to Python or static analysis. The project follows **Plan A** (full parser/AST approach) from the planning documents.
+**SAS2AST** is a Python library that parses SAS code into a typed AST and dependency graph. It implements two complementary approaches side by side:
 
-**Status:** Greenfield project in planning phase. No implementation code exists yet. The PRD, two strategy documents, and SAS test fixtures are in place.
-
-## Key Documents
-
-- `prd.md` — Complete product requirements document with AST model (40+ node types), API spec, macro expansion rules, lineage rules, and PROC coverage
-- `plan-a-full-parser.md` — Chosen strategy: full SAS-to-AST parser with macro expansion (18 weeks, 4 milestones)
-- `plan-b-macro-deps.md` — Alternative strategy: lightweight dependency graph without full AST (for reference only)
-
-## Tech Stack
-
-- **Python 3.10+**
-- **Arpeggio** PEG parser (only external dependency)
-- No other dependencies beyond stdlib
-
-## Architecture (from PRD)
-
-The parser pipeline is: **SAS source → Arpeggio PEG parse tree → AST visitor → typed `Program` AST**
-
-Core API:
-```python
-sas2ast.parse(source) -> ParseResult        # full pipeline: parse + AST + errors
-sas2ast.parse_tree(source) -> ParseTree     # raw Arpeggio tree (unstable/advanced)
-sas2ast.build_ast(parse_tree) -> Program    # tree → AST conversion
-sas2ast.collect_datasets(program) -> DatasetsSummary  # dataset lineage
-sas2ast.collect_macros(program) -> list[MacroCall]    # macro usage
-```
-
-Key architectural decisions:
-- Macro bodies are inlined at call sites before AST construction; definitions retained as `MacroDef` nodes
-- Unsupported constructs preserved as `UnknownStatement`/`UnknownProcOption` (partial parsing is the default)
-- PROC SQL stores raw SQL text (not parsed into sub-AST)
-- All AST nodes inherit from `Node` and implement `to_dict()` for snapshot testing
-- Error recovery syncs to `RUN;`/`QUIT;` for PROC blocks and `END;` for `DO` blocks
-
-## Test Fixtures
-
-SAS sample files are in `sas_code/`, organized by category:
-- `data_step/` — DATA step constructs (6 files)
-- `macro/` — Macro definitions and calls (7 files)
-- `mixed/` — Mixed constructs (4 files)
-- `proc/` — PROC step examples (18 files)
-- `deferred/` — Advanced/deferred constructs (7 files)
-
-These are production SAS examples intended as parser test cases.
+- **Plan A (`sas2ast.parser`)** — Full recursive-descent parser producing a typed AST with 40+ node classes, macro expansion, and lineage helpers.
+- **Plan B (`sas2ast.analyzer`)** — Lightweight token scanner producing a 3-layer dependency graph (macro call graph, dataset lineage, intra-step PDG) with confidence scoring.
 
 ## Build / Test / Lint Commands
 
-Not yet configured. When setting up the project:
-- Use `pyproject.toml` for project metadata and dependencies
-- Use pytest for testing with AST snapshot tests via `to_dict()`
-- The PRD specifies unit tests + fixture corpus as the testing strategy
+```bash
+pip install -e ".[dev]"         # install with dev dependencies (pytest, arpeggio)
+pytest                          # run all 240+ tests
+pytest -v                       # verbose output
+pytest tests/parser/            # run parser tests only
+pytest tests/analyzer/          # run analyzer tests only
+pytest -k "test_data_step"      # run tests matching a pattern
+```
+
+No linter is configured yet. The build system is hatchling (`pyproject.toml`).
+
+## CLI
+
+```bash
+sas2ast parse FILE [--format tree|json|rich|html|summary] [--output FILE]
+sas2ast analyze FILE [--format tree|json|rich|html|summary|dot] [--output FILE]
+sas2ast batch DIR [--format summary|json] [--output FILE]
+```
+
+Entry point: `sas2ast/__main__.py`. Formatters are lazy-loaded from `sas2ast/formatters/`.
+
+## Architecture
+
+The project has three main packages sharing a common infrastructure layer:
+
+**`sas2ast/common/`** — Shared tokenizer and models used by both Plan A and Plan B:
+- `tokens.py` — `SASTokenizer`: state-machine tokenizer handling comments, quoted strings, CARDS blocks, macro refs, name/date literals
+- `models.py` — `DatasetRef`, `Location`, `SourceSpan`
+- `utils.py` — `parse_dataset_name()`, `extract_sql_tables()` (regex-based SQL table extraction)
+- `keywords.py` — SAS keyword sets, mnemonic operator map, PROC registry
+- `errors.py` — `ParseError` dataclass
+
+**`sas2ast/parser/`** (Plan A) — Full AST parser pipeline:
+- `visitor.py` — `ASTBuilder`: recursive-descent parser (~1500 lines), the core of Plan A. Consumes tokens from the shared tokenizer and builds a `Program` AST.
+- `ast_nodes.py` — 40+ typed AST node classes, all inheriting from `Node` with `to_dict()`
+- `macro_expander.py` — Two-pass engine: (1) register `%macro` defs + resolve `%let`, (2) expand calls via scope chain. Depth limit of 50.
+- `lineage.py` — `collect_datasets()`, `collect_macros()`, `collect_lineage()` over the AST
+- `grammar*.py` — Arpeggio PEG grammar files (currently secondary to the recursive-descent parser in `visitor.py`)
+- `preprocessor.py` — Comment stripping + CARDS handling
+
+**`sas2ast/analyzer/`** (Plan B) — Dependency graph via token scanning:
+- `scanner.py` — `TokenStream`: look-ahead/look-back scanner over tokens
+- `macro_graph.py` — Layer A: macro defs, calls, variable def-use edges
+- `step_graph.py` — Layer B: step boundaries, dataset reads/writes per step kind
+- `pdg.py` — Layer C: intra-step program dependence graph (best-effort)
+- `confidence.py` — Confidence scoring (literal=0.9, with libref=0.95, symbolic=0.4, guard reduction=0.3)
+- `guards.py` — `%if`/`%do` guard condition tracking
+- `graph_model.py` — `DependencyGraph`, `StepNode`, `StepEdge`, etc.
+- `exporters.py` — `to_json()`, `to_dict()`, `to_dot()`
+
+**`sas2ast/formatters/`** — Output formatters (lazy-loaded): tree, json, rich, html, summary.
+
+## Key Design Decisions
+
+- Both Plan A and Plan B share the same tokenizer (`common/tokens.py`) but diverge after tokenization
+- Plan A's parser is a hand-written recursive-descent parser (`visitor.py`), not Arpeggio-driven. The `grammar*.py` files define an Arpeggio PEG grammar but the main parse path uses `ASTBuilder`.
+- Macro expansion is optional (`parse(source, expand_macros=True)`) and happens as a text-level pre-pass before AST construction
+- Unsupported constructs are preserved as `UnknownStatement`/`UnknownProcOption` (partial parsing, never fails completely)
+- Error recovery syncs to step boundaries (`RUN;`/`QUIT;`/`DATA`/`PROC`)
+- PROC SQL stores raw SQL text, not a sub-AST
+- Cross-validation tests verify Plan A and Plan B agree on literal dataset names
+
+## Test Fixtures
+
+42 SAS fixture files in `sas_code/` organized by category: `data_step/`, `proc/`, `macro/`, `mixed/`, `deferred/`. Loaded via helpers in `tests/conftest.py`.
+
+## Key Documents
+
+- `docs/prd.md` — Product requirements document (AST model, API spec, macro expansion rules, lineage rules, PROC coverage)
+- `docs/plan-a-full-parser.md` — Plan A design
+- `docs/plan-b-macro-deps.md` — Plan B design
+
+## Dependencies
+
+- **Runtime**: no required dependencies. `arpeggio>=2.0` optional (`[parser]` extra). `rich>=12.0` optional (`[rich]` extra).
+- **Dev**: `pytest>=7.0`, `pytest-snapshot`, `arpeggio>=2.0`
+- **Python**: `>=3.8` (uses `from __future__ import annotations`)
