@@ -17,8 +17,12 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
+[project.scripts]
+sas2ast = "sas2ast.__main__:main"
+
 [project.optional-dependencies]
 parser = ["arpeggio>=2.0"]
+rich = ["rich>=12.0"]
 dev = [
     "pytest>=7.0",
     "pytest-snapshot",
