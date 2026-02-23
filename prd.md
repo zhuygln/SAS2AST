@@ -68,6 +68,11 @@ datasets = sas2ast.collect_datasets(ast)  # DatasetsSummary(inputs=['in'], outpu
 - Macro calls are preserved and accessible via `collect_macros()` after expansion.  
 - `%include` is parsed as an `Include` node but is not expanded in v1.
 - `%sysfunc`, `%eval`, `%sysevalf` are recognized but not executed; calls are preserved and logged as warnings.
+**Macro body storage (v1):**
+- `MacroDef.body` stores the raw SAS text between `%macro` and `%mend` (not pre-parsed statements).
+- During expansion, the macro body text is substituted at each call site with parameter values resolved, then the resulting text is parsed as part of the surrounding context.
+- Macro control flow (`%do`, `%if`/`%then`/`%else`, `%do %while`, `%do %until`) within macro bodies is evaluated during expansion to determine which text to emit.
+
 **Macro variable scoping (v1):**
 - `%let` at top level creates/overwrites global macro variables.  
 - `%let` inside a macro definition creates/overwrites local macro variables.  
@@ -81,6 +86,19 @@ datasets = sas2ast.collect_datasets(ast)  # DatasetsSummary(inputs=['in'], outpu
 - Comments supported: line comments `* comment;` and block comments `/* comment */` (ignored but advance line/col).  
 - String escaping: `""` inside double quotes and `''` inside single quotes.  
 - Macro variables inside string literals are not expanded in v1.
+
+**Expression precedence (v1):**
+- Operator precedence from highest to lowest:
+  1. `**` (exponentiation, right-associative)
+  2. Unary `+`, `-`, `NOT` / `^` / `~`
+  3. `*`, `/`
+  4. `+`, `-`
+  5. `||` (concatenation)
+  6. `<`, `<=`, `=`, `^=` / `~=` / `NE`, `>=`, `>`, `IN`, `BETWEEN`, `IS MISSING` / `IS NULL`
+  7. `AND` / `&`
+  8. `OR` / `|`
+- SAS mnemonic operators (`EQ`, `NE`, `LT`, `LE`, `GT`, `GE`) are aliases for their symbolic forms.
+- Parentheses override precedence as usual.
 
 **Encoding (v1):**
 - Input is assumed to be UTF‑8.  
@@ -106,7 +124,7 @@ datasets = sas2ast.collect_datasets(ast)  # DatasetsSummary(inputs=['in'], outpu
 **Lineage rules (v1):**
 - DATA outputs: all datasets in `DATA` header are outputs, except `_NULL_` (ignored as output).
 - Inputs: `SET` and `MERGE` datasets are inputs.
-- Dataset options `KEEP=`, `DROP=`, `RENAME=` are captured on dataset refs but do not change input/output classification.
+- Dataset options `KEEP=`, `DROP=`, `RENAME=`, `WHERE=` are captured on dataset refs but do not change input/output classification.
 - If a DATA step has no `SET`/`MERGE`, inputs are empty.
 - Multiple outputs in `DATA` are all listed.
 - `OUTPUT;` without a target does not change lineage (outputs already known from `DATA` header).
@@ -137,11 +155,11 @@ datasets = sas2ast.collect_datasets(ast)  # DatasetsSummary(inputs=['in'], outpu
 ### 4.2 AST model (core nodes v1)
 ```python
 class Program: version: str, steps: list[Step], macros: list[MacroDef]  # version uses semver, e.g., "1.0.0"
-class DatasetRef: libref: str | None, name: str, options: dict[str, Any]  # libref=None means WORK; options parsed into lists/maps where possible (KEEP, DROP, RENAME)
-class DataStep(Step): name: str, outputs: list[DatasetRef], sources: list[DatasetRef], statements: list[Statement], options: dict[str, Any]  # options on DATA statement (DROP=, KEEP=, RENAME=)
+class DatasetRef: libref: str | None, name: str, options: dict[str, Any]  # libref=None means WORK; options parsed into lists/maps where possible (KEEP, DROP, RENAME, WHERE)
+class DataStep(Step): outputs: list[DatasetRef], sources: list[DatasetRef], statements: list[Statement], options: dict[str, Any]  # options on DATA statement (DROP=, KEEP=, RENAME=); no `name` field — use outputs[0].name if a single name is needed
 class ProcStatement
 class ProcStep(Step): name: str, options: dict[str, Any], statements: list[ProcStatement]  # unknown options preserved as UnknownProcOption
-class Assignment(Statement): target: Var, expression: Expr
+class Assignment(Statement): target: Var | Call, expression: Expr  # target is Call for substr(x,1,3) = 'abc' form
 class IfThen(Statement): condition: Expr, then_body: list[Statement], else_body: list[Statement] | None
 class DoLoop(Statement): var: str, start: Expr, end: Expr, by: Expr | None, body: list[Statement]
 class DoWhile(Statement): condition: Expr, body: list[Statement]
@@ -172,9 +190,14 @@ class Continue(Statement)
 class Return(Statement)
 class Stop(Statement)
 class Abort(Statement): options: dict[str, Any] | None
-class Cards(Statement): data: str  # CARDS/DATALINES inline data block
+class CallRoutine(Statement): name: str, args: list[Expr]  # CALL SYMPUTX, CALL EXECUTE, CALL MISSING, etc.
+class Cards(Statement): data: str  # CARDS/DATALINES inline data block; terminated by a line containing only a semicolon (;) or four semicolons (;;;;)
 class MacroCall(Statement): name: str, args: list[Expr | str] | None, raw_args: str | None, parse_errors: list[ParseError] | None
-class MacroDef(Statement): name: str, params: list[str], body: list[Statement]  # stored in Program.macros
+class MacroDef(Statement): name: str, params: list[MacroParam], body: str  # body is raw SAS text (parsed on expansion); stored in Program.macros
+class MacroParam: name: str, default: str | None  # default is raw text, not evaluated
+class MacroDoLoop(Statement): var: str, start: Expr, end: Expr, by: Expr | None, body: list[Statement]  # %do var=start %to end; ... %end;
+class MacroDoWhile(Statement): condition: Expr, body: list[Statement]  # %do %while(cond); ... %end;
+class MacroDoUntil(Statement): condition: Expr, body: list[Statement]  # %do %until(cond); ... %end;
 class MacroVar(Expr): name: str
 class Include(Statement): path: str
 class Libname(Statement): libref: str, engine: str | None, path: str | None, options: dict[str, Any]
@@ -184,15 +207,17 @@ class Title(Statement): number: int | None, text: str  # TITLE/TITLE1-TITLE10
 class Footnote(Statement): number: int | None, text: str  # FOOTNOTE/FOOTNOTE1-FOOTNOTE10
 class OdsStatement(Statement): directive: str, options: dict[str, Any]  # ODS SELECT, ODS OUTPUT, etc.
 class Var(Expr): name: str
-class Literal(Expr): value: Any
+class Literal(Expr): value: Any, suffix: str | None  # suffix is 'd' for date, 't' for time, 'dt' for datetime (e.g., '01JAN2020'd)
 class BinaryOp(Expr): op: str, left: Expr, right: Expr
 class Call(Expr): name: str, args: list[Expr]
 class UnaryOp(Expr): op: str, operand: Expr  # NOT, negative
 class ArrayRef(Expr): name: str, index: list[Expr]  # array[i] or array[i,j]
 class InOperator(Expr): left: Expr, values: list[Expr]  # x IN (1, 2, 3)
+class BetweenOperator(Expr): left: Expr, low: Expr, high: Expr  # x BETWEEN 1 AND 10
+class IsMissing(Expr): operand: Expr, negated: bool  # x IS MISSING / x IS NOT MISSING / x IS NULL / x IS NOT NULL
 class UnknownStatement(Statement): raw: str, line: int, col: int
 class UnknownProcOption: name: str, value: str | None
-class ProcSql(ProcStatement): sql: str
+class ProcSql(ProcStatement): sql: str  # one node per SQL statement within the PROC SQL block (CREATE TABLE, SELECT, INSERT, etc.); SAS-specific extensions preserved as-is
 class ParseError: message: str, line: int, col: int, snippet: str, severity: str
 class ParseResult: program: Program, errors: list[ParseError]
 class Node: def to_dict(self) -> dict[str, Any]
@@ -227,8 +252,6 @@ All AST nodes inherit from `Node` and implement `to_dict()`.
 **M4 (3 weeks):** Hardening, docs/examples, API stabilization, larger fixture corpus.
 
 ***
-
-This PRD is now complete and ready for your repo `README.md` or `docs/prd.md`.
 
 ## 7. Assumptions / Glossary
 

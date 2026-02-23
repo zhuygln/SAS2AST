@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sas2ast"
+dynamic = ["version"]
+description = "Parse SAS code into a typed AST and dependency graph"
+license = "MIT"
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.optional-dependencies]
+parser = ["arpeggio>=2.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-snapshot",
+    "arpeggio>=2.0",
+]
+
+[tool.hatch.version]
+path = "sas2ast/_version.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
