@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-02-23
+
+### Added
+
+#### CLI (`sas2ast.__main__`)
+- `sas2ast parse FILE` — parse a SAS file and display the AST.
+- `sas2ast analyze FILE` — analyze a SAS file and display the dependency graph.
+- `sas2ast batch DIR` — process all `.sas` files in a directory.
+- `--format` flag supporting `tree`, `json`, `rich`, `html`, `summary` (and `dot` for analyze).
+- `--output` flag to write results to a file instead of stdout.
+- `--version` flag.
+
+#### Output Formatters (`sas2ast.formatters`)
+- **tree** — indented text tree of AST nodes or graph layers.
+- **json** — JSON serialization via `to_dict()`.
+- **rich** — Rich terminal output with color and panels (requires `rich` optional dependency).
+- **html** — standalone HTML report with collapsible sections.
+- **summary** — compact text summary of steps, statements, macros, datasets, and errors.
+- Lazy-loaded formatter registry via `get_formatter(name)`.
+
+#### Top-level API
+- `get_formatter()` and `AVAILABLE_FORMATS` exported from `sas2ast.__init__`.
+
 ## [0.1.0] - 2026-02-23
 
 Initial release implementing both Plan A (full AST parser) and Plan B (dependency graph analyzer) side by side.
