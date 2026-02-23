@@ -236,9 +236,9 @@ pytest -v
 
 ## Design documents
 
-- [prd.md](prd.md) — Product requirements document
-- [plan-a-full-parser.md](plan-a-full-parser.md) — Plan A design (full AST parser)
-- [plan-b-macro-deps.md](plan-b-macro-deps.md) — Plan B design (dependency graph analyzer)
+- [docs/prd.md](docs/prd.md) — Product requirements document
+- [docs/plan-a-full-parser.md](docs/plan-a-full-parser.md) — Plan A design (full AST parser)
+- [docs/plan-b-macro-deps.md](docs/plan-b-macro-deps.md) — Plan B design (dependency graph analyzer)
 
 ## License
 
