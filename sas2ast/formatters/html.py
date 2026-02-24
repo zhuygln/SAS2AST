@@ -21,6 +21,7 @@ _CSS = """\
   --red: #f38ba8;
   --surface: #313244;
   --border: #45475a;
+  --muted: #6c7086;
 }
 @media (prefers-color-scheme: light) {
   :root {
@@ -32,6 +33,7 @@ _CSS = """\
     --red: #d20f39;
     --surface: #e6e9ef;
     --border: #ccd0da;
+    --muted: #8c8fa1;
   }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -53,10 +55,24 @@ summary:hover { color: var(--accent); }
 .dataset { color: var(--green); }
 .keyword { color: var(--yellow); }
 .error { color: var(--red); }
+.unknown { color: var(--muted); font-style: italic; }
+.expand-all {
+  background: var(--surface);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+.expand-all:hover { background: var(--border); }
 table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
 th, td { padding: 0.4rem 0.8rem; border: 1px solid var(--border); text-align: left; }
 th { background: var(--surface); color: var(--accent); }
 tr:nth-child(even) { background: var(--surface); }
+.table-wrap { overflow-x: auto; margin: 0.5rem 0; }
 .dot-source { background: var(--surface); padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0; }
 .error-list { list-style: none; padding: 0; }
 .error-list li { padding: 0.3rem 0.5rem; margin: 0.2rem 0; border-left: 3px solid var(--red); background: var(--surface); }
@@ -64,6 +80,24 @@ tr:nth-child(even) { background: var(--surface); }
 .summary-box { background: var(--surface); padding: 1rem; border-radius: 4px; margin: 0.5rem 0; }
 .summary-box dt { font-weight: bold; color: var(--accent); }
 .summary-box dd { margin-left: 1rem; margin-bottom: 0.3rem; }
+nav.section-nav {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0;
+  margin: -0.5rem 0 1rem;
+  z-index: 10;
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+nav.section-nav a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+nav.section-nav a:hover { text-decoration: underline; }
 """
 
 _JS = """\
@@ -80,6 +114,8 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 """
+
+_SQL_KEYWORDS = ("SELECT", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "WITH")
 
 
 def format_ast(result: ParseResult, filename: Optional[str] = None) -> str:
@@ -130,12 +166,13 @@ def format_graph(graph: DependencyGraph, filename: Optional[str] = None) -> str:
     if lineage:
         body_parts.append(_render_lineage_html(lineage))
 
-    # DOT source
+    # DOT source (collapsed by default)
     dot = to_dot(graph)
     body_parts.append('<section>')
     body_parts.append('<h2>DOT Graph Source</h2>')
+    body_parts.append('<details><summary>Show DOT source</summary>')
     body_parts.append(f'<pre class="dot-source">{html_lib.escape(dot)}</pre>')
-    body_parts.append('</section>')
+    body_parts.append('</details></section>')
 
     return _wrap_html(title, "\n".join(body_parts))
 
@@ -149,45 +186,64 @@ def format_full(
     title = f"Report: {html_lib.escape(filename)}" if filename else "SAS Analysis Report"
     d = result.to_dict()
 
-    body_parts = []
+    sections: List[str] = []
+    nav_items: List[tuple] = []
 
     # Summary
-    body_parts.append(_render_summary_html(result, graph, filename))
+    sections.append(_render_summary_html(result, graph, filename))
+    nav_items.append(("sec-summary", "Summary"))
 
     # AST
-    body_parts.append('<section>')
-    body_parts.append('<h2>AST Tree <button class="expand-all">Expand All</button></h2>')
+    ast_parts = ['<section id="sec-ast">']
+    ast_parts.append('<h2>AST Tree <button class="expand-all">Expand All</button></h2>')
     program = d.get("program")
     if program:
-        body_parts.append(_render_program_html(program))
+        ast_parts.append(_render_program_html(program))
     else:
-        body_parts.append("<p>(no program parsed)</p>")
-    body_parts.append('</section>')
+        ast_parts.append("<p>(no program parsed)</p>")
+    ast_parts.append('</section>')
+    sections.append("\n".join(ast_parts))
+    nav_items.append(("sec-ast", "AST Tree"))
 
     # Graph sections
     if graph.steps:
-        body_parts.append(_render_steps_html(graph))
+        sections.append(_render_steps_html(graph, section_id="sec-steps"))
+        nav_items.append(("sec-steps", "Step Flow"))
     if graph.step_edges:
-        body_parts.append(_render_edges_html(graph))
+        sections.append(_render_edges_html(graph, section_id="sec-edges"))
+        nav_items.append(("sec-edges", "Edges"))
     if graph.macro_defs:
-        body_parts.append(_render_macros_html(graph))
+        sections.append(_render_macros_html(graph, section_id="sec-macros"))
+        nav_items.append(("sec-macros", "Macros"))
     lineage = graph.dataset_lineage()
     if lineage:
-        body_parts.append(_render_lineage_html(lineage))
+        sections.append(_render_lineage_html(lineage, section_id="sec-lineage"))
+        nav_items.append(("sec-lineage", "Dataset Lineage"))
 
     # Errors
     errors = d.get("errors", [])
     if errors:
-        body_parts.append(_render_errors_html(errors))
+        sections.append(_render_errors_html(errors, section_id="sec-errors"))
+        nav_items.append(("sec-errors", "Errors"))
 
-    # DOT source
+    # DOT source (collapsed by default)
     dot = to_dot(graph)
-    body_parts.append('<section>')
-    body_parts.append('<h2>DOT Graph Source</h2>')
-    body_parts.append(f'<pre class="dot-source">{html_lib.escape(dot)}</pre>')
-    body_parts.append('</section>')
+    dot_parts = ['<section id="sec-dot">']
+    dot_parts.append('<h2>DOT Graph Source</h2>')
+    dot_parts.append('<details><summary>Show DOT source</summary>')
+    dot_parts.append(f'<pre class="dot-source">{html_lib.escape(dot)}</pre>')
+    dot_parts.append('</details></section>')
+    sections.append("\n".join(dot_parts))
+    nav_items.append(("sec-dot", "DOT Source"))
 
-    return _wrap_html(title, "\n".join(body_parts))
+    # Build nav bar
+    nav_links = " ".join(
+        f'<a href="#{id_}">{label}</a>' for id_, label in nav_items
+    )
+    nav = f'<nav class="section-nav">{nav_links}</nav>'
+
+    body = nav + "\n" + "\n".join(sections)
+    return _wrap_html(title, body)
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +282,7 @@ def _render_program_html(program: dict) -> str:
 
 
 def _render_node_html(node: dict) -> str:
-    """Render an AST node as collapsible <details>."""
+    """Render an AST node as collapsible <details> or plain <div> for leaves."""
     if not isinstance(node, dict):
         return html_lib.escape(str(node))
 
@@ -236,7 +292,7 @@ def _render_node_html(node: dict) -> str:
 
     if children:
         return f"<details><summary>{label}</summary>\n{children}\n</details>"
-    return f"<details><summary>{label}</summary></details>"
+    return f"<div>{label}</div>"
 
 
 def _html_node_label(node: dict, ntype: str) -> str:
@@ -289,19 +345,20 @@ def _html_node_label(node: dict, ntype: str) -> str:
     if ntype == "Libname":
         libref = e(node.get("libref", ""))
         path = e(node.get("path", ""))
-        return f'<span class="node-type">Libname</span>: {libref} \u25b6 {path!r}'
+        return f'<span class="node-type">Libname</span>: {libref} \u25b6 {path}'
 
     if ntype == "ProcSql":
-        sql = node.get("sql", "")
-        if len(sql) > 60:
-            sql = sql[:57] + "..."
-        return f'<span class="node-type">SQL</span>: {e(sql)}'
+        content = node.get("sql", "")
+        if len(content) > 60:
+            content = content[:57] + "..."
+        prefix = "SQL" if content.strip().upper().startswith(_SQL_KEYWORDS) else "Statement"
+        return f'<span class="node-type">{prefix}</span>: {e(content)}'
 
     if ntype == "UnknownStatement":
         raw = node.get("raw", "")
         if len(raw) > 50:
             raw = raw[:47] + "..."
-        return f'<span class="error">Unknown: {e(raw)}</span>'
+        return f'<span class="unknown">Unknown: {e(raw)}</span>'
 
     return f'<span class="node-type">{e(ntype)}</span>'
 
@@ -367,12 +424,13 @@ def _html_node_children(node: dict, ntype: str) -> str:
     return "\n".join(parts)
 
 
-def _render_steps_html(graph: DependencyGraph) -> str:
+def _render_steps_html(graph: DependencyGraph, section_id: str = "") -> str:
+    id_attr = f' id="{section_id}"' if section_id else ""
     rows = []
     for step in graph.steps:
-        writes = ", ".join(html_lib.escape(w.qualified_name) for w in step.writes)
-        reads = ", ".join(html_lib.escape(r.qualified_name) for r in step.reads)
-        guards = ", ".join(html_lib.escape(g) for g in step.guards) if step.guards else ""
+        writes = ", ".join(html_lib.escape(w.qualified_name) for w in step.writes) or "\u2014"
+        reads = ", ".join(html_lib.escape(r.qualified_name) for r in step.reads) or "\u2014"
+        guards = (", ".join(html_lib.escape(g) for g in step.guards) if step.guards else "") or "\u2014"
         rows.append(
             f"<tr><td>{html_lib.escape(step.id)}</td>"
             f"<td>{html_lib.escape(step.kind)}</td>"
@@ -381,17 +439,19 @@ def _render_steps_html(graph: DependencyGraph) -> str:
             f"<td>{guards}</td></tr>"
         )
     return (
-        "<section><h2>Step Flow</h2><table>"
+        f"<section{id_attr}><h2>Step Flow</h2>"
+        '<div class="table-wrap"><table>'
         "<tr><th>ID</th><th>Kind</th><th>Writes</th><th>Reads</th><th>Guards</th></tr>"
         + "\n".join(rows)
-        + "</table></section>"
+        + "</table></div></section>"
     )
 
 
-def _render_edges_html(graph: DependencyGraph) -> str:
+def _render_edges_html(graph: DependencyGraph, section_id: str = "") -> str:
+    id_attr = f' id="{section_id}"' if section_id else ""
     rows = []
     for edge in graph.step_edges:
-        guard = html_lib.escape(edge.guard) if edge.guard else ""
+        guard = html_lib.escape(edge.guard) if edge.guard else "\u2014"
         rows.append(
             f"<tr><td>{html_lib.escape(edge.source)}</td>"
             f'<td class="dataset">{html_lib.escape(edge.dataset)}</td>'
@@ -400,15 +460,17 @@ def _render_edges_html(graph: DependencyGraph) -> str:
             f"<td>{guard}</td></tr>"
         )
     return (
-        "<section><h2>Edges</h2><table>"
+        f"<section{id_attr}><h2>Edges</h2>"
+        '<div class="table-wrap"><table>'
         "<tr><th>Source</th><th>Dataset</th><th>Target</th><th>Confidence</th><th>Guard</th></tr>"
         + "\n".join(rows)
-        + "</table></section>"
+        + "</table></div></section>"
     )
 
 
-def _render_macros_html(graph: DependencyGraph) -> str:
-    parts = ["<section><h2>Macros</h2>"]
+def _render_macros_html(graph: DependencyGraph, section_id: str = "") -> str:
+    id_attr = f' id="{section_id}"' if section_id else ""
+    parts = [f"<section{id_attr}><h2>Macros</h2>"]
     for md in graph.macro_defs:
         params = ", ".join(html_lib.escape(p) for p in md.params) if md.params else ""
         sig = f"{html_lib.escape(md.name)}({params})" if params else html_lib.escape(md.name)
@@ -424,25 +486,28 @@ def _render_macros_html(graph: DependencyGraph) -> str:
     return "\n".join(parts)
 
 
-def _render_lineage_html(lineage: Dict[str, dict]) -> str:
+def _render_lineage_html(lineage: Dict[str, dict], section_id: str = "") -> str:
+    id_attr = f' id="{section_id}"' if section_id else ""
     rows = []
     for ds_name, info in sorted(lineage.items()):
-        writers = ", ".join(html_lib.escape(w) for w in info["writers"])
-        readers = ", ".join(html_lib.escape(r) for r in info["readers"])
-        status = "terminal" if info["writers"] and not info["readers"] else ""
+        writers = ", ".join(html_lib.escape(w) for w in info["writers"]) or "\u2014"
+        readers = ", ".join(html_lib.escape(r) for r in info["readers"]) or "\u2014"
+        status = "terminal" if info["writers"] and not info["readers"] else "\u2014"
         rows.append(
             f'<tr><td class="dataset">{html_lib.escape(ds_name)}</td>'
             f"<td>{writers}</td><td>{readers}</td><td>{status}</td></tr>"
         )
     return (
-        "<section><h2>Dataset Lineage</h2><table>"
+        f"<section{id_attr}><h2>Dataset Lineage</h2>"
+        '<div class="table-wrap"><table>'
         "<tr><th>Dataset</th><th>Writers</th><th>Readers</th><th>Status</th></tr>"
         + "\n".join(rows)
-        + "</table></section>"
+        + "</table></div></section>"
     )
 
 
-def _render_errors_html(errors: list) -> str:
+def _render_errors_html(errors: list, section_id: str = "") -> str:
+    id_attr = f' id="{section_id}"' if section_id else ""
     items = []
     for err in errors:
         sev = err.get("severity", "error")
@@ -456,7 +521,7 @@ def _render_errors_html(errors: list) -> str:
         items.append(f"<li>{text}</li>")
 
     cls = "error-list"
-    return f'<section><h2>Errors</h2><ul class="{cls}">{"".join(items)}</ul></section>'
+    return f'<section{id_attr}><h2>Errors</h2><ul class="{cls}">{"".join(items)}</ul></section>'
 
 
 def _render_summary_html(
@@ -464,17 +529,54 @@ def _render_summary_html(
     graph: DependencyGraph,
     filename: Optional[str],
 ) -> str:
-    from sas2ast.formatters.summary import format_ast as summary_ast
-    from sas2ast.formatters.summary import format_graph as summary_graph
+    """Render a unified summary using graph as source of truth for counts."""
+    e = html_lib.escape
 
-    ast_summary = summary_ast(result, filename=filename)
-    graph_summary = summary_graph(graph, filename=filename)
+    parts = ['<section id="sec-summary"><h2>Summary</h2><dl class="summary-box">']
 
-    return (
-        '<section><h2>Summary</h2>'
-        f'<pre class="summary-box">{html_lib.escape(ast_summary)}\n\n{html_lib.escape(graph_summary)}</pre>'
-        '</section>'
+    if filename:
+        parts.append(f'<dt>File</dt><dd>{e(filename)}</dd>')
+
+    # Steps from graph (source of truth)
+    step_counts: Dict[str, int] = {}
+    for step in graph.steps:
+        step_counts[step.kind] = step_counts.get(step.kind, 0) + 1
+    total_steps = sum(step_counts.values())
+    breakdown = ", ".join(
+        f"{c} {t}" for t, c in sorted(step_counts.items(), key=lambda x: -x[1])
     )
+    step_text = str(total_steps)
+    if breakdown:
+        step_text += f" ({e(breakdown)})"
+    parts.append(f'<dt>Steps</dt><dd>{step_text}</dd>')
+
+    # Edges
+    parts.append(f'<dt>Edges</dt><dd>{len(graph.step_edges)}</dd>')
+
+    # Macros
+    parts.append(f'<dt>Macros</dt><dd>{len(graph.macro_defs)}</dd>')
+
+    # Datasets from graph lineage
+    lineage = graph.dataset_lineage()
+    read_count = sum(1 for info in lineage.values() if info["readers"])
+    write_count = sum(1 for info in lineage.values() if info["writers"])
+    terminal = sum(
+        1 for info in lineage.values() if info["writers"] and not info["readers"]
+    )
+    ds_text = f'{read_count} read, {write_count} written'
+    if terminal:
+        ds_text += f', {terminal} terminal'
+    parts.append(f'<dt>Datasets</dt><dd>{ds_text}</dd>')
+
+    # Errors from parse result
+    err_list = [err for err in result.errors if err.severity == "error"]
+    warn_list = [err for err in result.errors if err.severity == "warning"]
+    parts.append(f'<dt>Errors</dt><dd>{len(err_list)}</dd>')
+    if warn_list:
+        parts.append(f'<dt>Warnings</dt><dd>{len(warn_list)}</dd>')
+
+    parts.append('</dl></section>')
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------

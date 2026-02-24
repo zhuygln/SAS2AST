@@ -28,6 +28,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Top-level API
 - `get_formatter()` and `AVAILABLE_FORMATS` exported from `sas2ast.__init__`.
 
+### Fixed
+
+#### HTML Report (`sas2ast.formatters.html`)
+- **Duplicate summary**: `format_full` no longer shows two separate summaries (AST + graph) with conflicting counts. Now renders a single unified summary using the dependency graph as source of truth for step/edge/dataset counts, with parse error counts from the AST.
+- **"Expand All" button unstyled**: Added CSS for `.expand-all` button (background, border, border-radius, hover state).
+- **Empty `<details>` for leaf nodes**: Leaf AST nodes (e.g. `Input`, `Output`, `Keep`) now render as `<div>` instead of empty `<details>` with a clickable triangle that expands to nothing.
+- **`UnknownStatement` styled as error**: `UnknownStatement` nodes now use a muted/italic `.unknown` CSS class instead of red `.error`, since they represent unhandled constructs rather than parse errors.
+- **Libname path double-quoted**: Removed `repr()` wrapping on Libname paths that caused `''casuser''` double-quoting.
+- **Non-SQL PROC statements labeled "SQL:"**: `ProcSql` nodes now show "Statement:" for non-SQL content (e.g. `var x`, `output out = stats`) and "SQL:" only for actual SQL keywords.
+- **No section navigation**: `format_full` now includes a sticky nav bar at the top with anchor links to each section (Summary, AST Tree, Step Flow, Edges, Macros, Dataset Lineage, Errors, DOT Source). All sections have `id` attributes.
+- **Empty table cells**: Steps with no reads/writes/guards now show `—` (em dash) instead of blank cells.
+- **DOT section noisy**: Raw DOT source is now collapsed by default inside a `<details>` element.
+- **Tables not scrollable on narrow viewports**: Tables are wrapped in `<div class="table-wrap">` with `overflow-x: auto`.
+
+#### Tree and Rich Formatters
+- **ProcSql label**: `tree.py` and `rich_fmt.py` now show "Statement:" instead of "SQL:" for non-SQL PROC sub-statements, matching the HTML formatter fix.
+
+### Changed
+- Test suite expanded from 296 to 309 tests (13 new HTML formatter tests).
+
 ## [0.1.0] - 2026-02-23
 
 Initial release implementing both Plan A (full AST parser) and Plan B (dependency graph analyzer) side by side.

@@ -268,10 +268,13 @@ def _rich_label(node: dict, ntype: str) -> str:
         return f"[bold cyan]Libname[/bold cyan]: {libref} \u25b6 {path!r}" if path else f"[bold cyan]Libname[/bold cyan]: {libref}"
 
     if ntype == "ProcSql":
-        sql = node.get("sql", "")
-        if len(sql) > 60:
-            sql = sql[:57] + "..."
-        return f"[bold]SQL[/bold]: {sql}"
+        content = node.get("sql", "")
+        if len(content) > 60:
+            content = content[:57] + "..."
+        prefix = "SQL" if content.strip().upper().startswith(
+            ("SELECT", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "WITH")
+        ) else "Statement"
+        return f"[bold]{prefix}[/bold]: {content}"
 
     if ntype == "UnknownStatement":
         raw = node.get("raw", "")

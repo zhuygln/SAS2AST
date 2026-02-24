@@ -172,12 +172,51 @@ All nodes inherit from `Node` and implement `to_dict()` for serialization.
 - Full SQL parsing within PROC SQL — SQL text is captured but not parsed into an AST
 - Macro variables inside string literals are not expanded
 
+## CLI
+
+sas2ast includes a command-line interface for parsing, analyzing, and batch-processing SAS files.
+
+```bash
+# Parse a file and print the AST tree
+sas2ast parse myfile.sas
+
+# Parse with a specific output format
+sas2ast parse myfile.sas --format json
+sas2ast parse myfile.sas --format html -o report.html
+
+# Analyze dependencies
+sas2ast analyze myfile.sas
+sas2ast analyze myfile.sas --format dot -o graph.dot
+
+# Batch process a directory
+sas2ast batch sas_code/ --format html -o output/
+```
+
+### Output formats
+
+| Format | Description |
+|--------|-------------|
+| `tree` | Plain-text indented tree with box-drawing characters (default for `parse`) |
+| `json` | Full AST or graph as JSON |
+| `summary` | Compact one-line counts (default for `analyze` and `batch`) |
+| `html` | Self-contained HTML report with dark/light themes, collapsible AST tree, step/edge/lineage tables, DOT source, and sticky section navigation |
+| `rich` | Colorized terminal output using Rich (falls back to `tree` if Rich is not installed) |
+| `dot` | Graphviz DOT format (graph only) |
+
+The HTML formatter's `format_full()` produces a combined report with:
+- Unified summary (step/edge/dataset counts from the dependency graph, parse error counts from the AST)
+- Collapsible AST tree with "Expand All" toggle
+- Step flow, edges, macros, and dataset lineage tables (scrollable on narrow viewports)
+- DOT graph source (collapsed by default)
+- Sticky nav bar for jumping between sections
+
 ## Project structure
 
 ```
 sas2ast/
 ├── __init__.py                 # Top-level API: parse(), analyze(), analyze_files()
 ├── _version.py                 # "0.1.0"
+├── cli.py                      # CLI entry point (parse, analyze, batch)
 ├── common/                     # Shared infrastructure
 │   ├── tokens.py               # SASTokenizer (string/comment/CARDS-aware)
 │   ├── models.py               # DatasetRef, Location, SourceSpan
@@ -196,22 +235,31 @@ sas2ast/
 │   ├── grammar_proc.py         # PROC sub-grammar
 │   ├── grammar_macro.py        # Macro sub-grammar
 │   └── preprocessor.py         # Comment-strip + CARDS handling
-└── analyzer/                   # Plan B: Dependency graph
-    ├── __init__.py             # analyze(), analyze_files()
-    ├── scanner.py              # TokenStream (look-ahead scanner)
-    ├── graph_model.py          # DependencyGraph, StepNode, StepEdge, etc.
-    ├── macro_graph.py          # Layer A: macro def/call/var extraction
-    ├── step_graph.py           # Layer B: step boundaries, dataset I/O
-    ├── pdg.py                  # Layer C: intra-step program dependence graph
-    ├── confidence.py           # Confidence scoring engine
-    ├── guards.py               # %if/%do guard tracking
-    └── exporters.py            # to_json(), to_dict(), to_dot()
+├── analyzer/                   # Plan B: Dependency graph
+│   ├── __init__.py             # analyze(), analyze_files()
+│   ├── scanner.py              # TokenStream (look-ahead scanner)
+│   ├── graph_model.py          # DependencyGraph, StepNode, StepEdge, etc.
+│   ├── macro_graph.py          # Layer A: macro def/call/var extraction
+│   ├── step_graph.py           # Layer B: step boundaries, dataset I/O
+│   ├── pdg.py                  # Layer C: intra-step program dependence graph
+│   ├── confidence.py           # Confidence scoring engine
+│   ├── guards.py               # %if/%do guard tracking
+│   └── exporters.py            # to_json(), to_dict(), to_dot()
+└── formatters/                 # Output formatting
+    ├── __init__.py             # Format registry: get_formatter(), AVAILABLE_FORMATS
+    ├── tree.py                 # Plain-text indented tree
+    ├── json_fmt.py             # JSON serialization
+    ├── summary.py              # Compact summary counts
+    ├── html.py                 # Self-contained HTML reports
+    └── rich_fmt.py             # Rich terminal output (optional)
 
-tests/                          # 240 tests
+tests/                          # 309 tests
 ├── conftest.py                 # Fixture loading helpers
 ├── common/                     # Tokenizer and model tests
 ├── parser/                     # AST parser, expressions, lineage, macros
-└── analyzer/                   # Scanner, graph, confidence, exporters
+├── analyzer/                   # Scanner, graph, confidence, exporters
+├── test_formatters.py          # Formatter output tests
+└── test_cli.py                 # CLI integration tests
 
 sas_code/                       # 42 SAS fixture files
 ├── data_step/                  # DATA step patterns

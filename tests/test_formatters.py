@@ -213,6 +213,7 @@ class TestHtmlFormatter:
 
     def test_format_ast_contains_details(self, parse_result):
         output = html.format_ast(parse_result)
+        # Nodes with children use <details>, leaf nodes use <div>
         assert "<details>" in output
         assert "<summary>" in output
 
@@ -247,6 +248,93 @@ class TestHtmlFormatter:
         result = sas2ast.parse(sas)
         output = html.format_ast(result)
         assert "<script>alert" not in output
+
+    def test_format_full_nav_bar(self, parse_result, dep_graph):
+        """Full report has a sticky nav bar with section links."""
+        output = html.format_full(parse_result, dep_graph, filename="test.sas")
+        assert '<nav class="section-nav">' in output
+        assert 'href="#sec-summary"' in output
+        assert 'href="#sec-ast"' in output
+
+    def test_format_full_section_ids(self, parse_result, dep_graph):
+        """Sections have id attributes for nav anchors."""
+        output = html.format_full(parse_result, dep_graph)
+        assert 'id="sec-summary"' in output
+        assert 'id="sec-ast"' in output
+        assert 'id="sec-dot"' in output
+
+    def test_format_full_dot_collapsed(self, parse_result, dep_graph):
+        """DOT section is collapsed by default in full report."""
+        output = html.format_full(parse_result, dep_graph)
+        assert "Show DOT source" in output
+
+    def test_format_graph_dot_collapsed(self, dep_graph):
+        """DOT section is collapsed by default in graph report."""
+        output = html.format_graph(dep_graph)
+        assert "Show DOT source" in output
+
+    def test_table_wrap(self, dep_graph):
+        """Tables are wrapped in scrollable div."""
+        output = html.format_graph(dep_graph)
+        assert 'class="table-wrap"' in output
+
+    def test_expand_all_button_styled(self, parse_result):
+        """Expand All button has CSS styling."""
+        output = html.format_ast(parse_result)
+        assert ".expand-all" in output  # CSS class in stylesheet
+
+    def test_unknown_class(self):
+        """UnknownStatement uses .unknown class, not .error."""
+        output = html._html_node_label(
+            {"_type": "UnknownStatement", "raw": "some unknown stmt"},
+            "UnknownStatement",
+        )
+        assert 'class="unknown"' in output
+        assert 'class="error"' not in output
+
+    def test_leaf_node_no_details(self):
+        """Leaf nodes render as <div>, not empty <details>."""
+        output = html._render_node_html(
+            {"_type": "Input"}
+        )
+        assert output.startswith("<div>")
+        assert "<details>" not in output
+
+    def test_procsql_label_sql(self):
+        """ProcSql with actual SQL content shows 'SQL:' prefix."""
+        output = html._html_node_label(
+            {"_type": "ProcSql", "sql": "SELECT * FROM foo"},
+            "ProcSql",
+        )
+        assert "SQL" in output
+        assert "Statement" not in output
+
+    def test_procsql_label_non_sql(self):
+        """ProcSql with non-SQL content shows 'Statement:' prefix."""
+        output = html._html_node_label(
+            {"_type": "ProcSql", "sql": "var x y z"},
+            "ProcSql",
+        )
+        assert "Statement" in output
+
+    def test_libname_no_double_quotes(self):
+        """Libname path is not wrapped in repr() quotes."""
+        output = html._html_node_label(
+            {"_type": "Libname", "libref": "mylib", "path": "'some/path'"},
+            "Libname",
+        )
+        # Should not have Python repr double-quoting
+        assert "\"'" not in output
+        assert "'\"" not in output
+
+    def test_format_full_unified_summary(self, parse_result, dep_graph):
+        """Full report uses a single unified summary (not two separate ones)."""
+        output = html.format_full(parse_result, dep_graph, filename="test.sas")
+        # Should have exactly one Summary section, using <dl> format
+        assert output.count("<h2>Summary</h2>") == 1
+        assert "<dl" in output
+        assert "<dt>Steps</dt>" in output
+        assert "<dt>Edges</dt>" in output
 
 
 # ---- Rich formatter ----

@@ -196,10 +196,13 @@ def _node_label(node: dict) -> str:
         return f"Include: {node.get('path', '')}"
 
     if ntype == "ProcSql":
-        sql = node.get("sql", "")
-        if len(sql) > 60:
-            sql = sql[:57] + "..."
-        return f"SQL: {sql}"
+        content = node.get("sql", "")
+        if len(content) > 60:
+            content = content[:57] + "..."
+        prefix = "SQL" if content.strip().upper().startswith(
+            ("SELECT", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "WITH")
+        ) else "Statement"
+        return f"{prefix}: {content}"
 
     if ntype == "Infile":
         return f"Infile: {node.get('fileref', '')}"
