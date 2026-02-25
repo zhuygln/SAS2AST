@@ -128,6 +128,29 @@ class TestStatements:
         assert len(inputs[0].vars) == 2
 
 
+class TestArrayAssignment:
+    """P3: Array element assignment parsed as Assignment with ArrayRef target."""
+
+    def test_array_element_assign(self):
+        source = "data out; array arr(3); arr[1] = 10; run;"
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assigns = [s for s in step.statements if isinstance(s, ast.Assignment)]
+        assert len(assigns) == 1
+        assert isinstance(assigns[0].target, ast.ArrayRef)
+        assert assigns[0].target.name == "arr"
+
+    def test_array_element_not_unknown(self):
+        source = "data out; charvar[i] = byte(96+i); run;"
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        unknowns = [s for s in step.statements if isinstance(s, ast.UnknownStatement)]
+        assert len(unknowns) == 0
+        assigns = [s for s in step.statements if isinstance(s, ast.Assignment)]
+        assert len(assigns) == 1
+        assert isinstance(assigns[0].target, ast.ArrayRef)
+
+
 class TestProcSteps:
     def test_proc_sort(self):
         result = ASTBuilder("proc sort data=input out=sorted; by var; run;").build()
@@ -169,6 +192,189 @@ class TestGlobalStatements:
         result = ASTBuilder("options nodate nocenter;").build()
         stmt = result.program.steps[0]
         assert isinstance(stmt, ast.Options)
+
+
+class TestHashMethodCalls:
+    """B1: Hash object method calls should not cause parse errors."""
+
+    def test_hash_define_key(self):
+        source = 'data out; declare hash h(); h.defineKey("key"); run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assert isinstance(step, ast.DataStep)
+        assert len(result.errors) == 0
+
+    def test_hash_define_data(self):
+        source = 'data out; declare hash h(); h.defineData("val"); run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assert isinstance(step, ast.DataStep)
+        assert len(result.errors) == 0
+
+    def test_hash_output(self):
+        source = 'data out; declare hash h(); h.output(dataset: "result"); run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assert isinstance(step, ast.DataStep)
+        assert len(result.errors) == 0
+
+    def test_hash_find(self):
+        source = 'data out; set in1; if h.find() = 0 then output; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assert isinstance(step, ast.DataStep)
+
+    def test_dotted_assignment_still_works(self):
+        """first.var = 1 should still parse as assignment."""
+        source = 'data out; set in1; by grp; first.grp = 1; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assigns = [s for s in step.statements if isinstance(s, ast.Assignment)]
+        assert len(assigns) >= 1
+
+
+class TestLengthDollar:
+    """B2: Length $N. format should parse without errors."""
+
+    def test_length_dollar_with_dot(self):
+        source = 'data out; length make $20.; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        lengths = [s for s in step.statements if isinstance(s, ast.Length)]
+        assert len(lengths) == 1
+        assert lengths[0].vars[0] == ("make", "$20")
+
+    def test_length_dollar_no_dot(self):
+        source = 'data out; length name $30; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        lengths = [s for s in step.statements if isinstance(s, ast.Length)]
+        assert len(lengths) == 1
+        assert lengths[0].vars[0] == ("name", "$30")
+
+    def test_length_numeric_with_dot(self):
+        source = 'data out; length val 8.; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        lengths = [s for s in step.statements if isinstance(s, ast.Length)]
+        assert len(lengths) == 1
+        assert lengths[0].vars[0] == ("val", 8)
+
+    def test_length_multiple_vars(self):
+        source = 'data out; length name $20. age 8 city $40.; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        lengths = [s for s in step.statements if isinstance(s, ast.Length)]
+        assert len(lengths) == 1
+        assert ("name", "$20") in lengths[0].vars
+        assert ("age", 8) in lengths[0].vars
+        assert ("city", "$40") in lengths[0].vars
+
+    def test_length_no_parse_errors(self):
+        source = 'data out; length make $20. model $40.; run;'
+        result = ASTBuilder(source).build()
+        assert len(result.errors) == 0
+
+
+class TestSumStatements:
+    """B3: SAS sum/accumulator statements like n+1; should parse without errors."""
+
+    def test_simple_sum(self):
+        source = 'data out; set in1; n+1; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assigns = [s for s in step.statements if isinstance(s, ast.Assignment)]
+        assert len(assigns) >= 1
+        assert len(result.errors) == 0
+
+    def test_sum_expression(self):
+        source = 'data out; set in1; total + amount; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assigns = [s for s in step.statements if isinstance(s, ast.Assignment)]
+        # Should produce assignment: total = total + amount
+        sum_assign = [a for a in assigns if hasattr(a, 'target') and
+                      isinstance(a.target, ast.Var) and a.target.name == "total"]
+        assert len(sum_assign) == 1
+        assert isinstance(sum_assign[0].expression, ast.BinaryOp)
+        assert sum_assign[0].expression.op == "+"
+
+    def test_sum_no_errors(self):
+        source = 'data _null_; set sashelp.cars; n+1; call symputx("n", n); run;'
+        result = ASTBuilder(source).build()
+        assert len(result.errors) == 0
+
+    def test_sum_in_do_loop(self):
+        source = 'data out; set in1; do i = 1 to 10; count+1; end; run;'
+        result = ASTBuilder(source).build()
+        assert len(result.errors) == 0
+
+
+class TestMethodCallsInExpressions:
+    """B4: Hash method calls in expressions should not produce orphan fragments."""
+
+    def test_hash_find_in_assignment(self):
+        source = 'data out; set in1; rc = h.find(); run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        assigns = [s for s in step.statements if isinstance(s, ast.Assignment)]
+        assert any(isinstance(a.target, ast.Var) and a.target.name == "rc" for a in assigns)
+        # No orphan Unknown: ( ) fragments
+        unknowns = [s for s in step.statements if isinstance(s, ast.UnknownStatement)]
+        orphans = [u for u in unknowns if u.raw.strip() in ("( )", "( ) = 0 )")]
+        assert len(orphans) == 0
+
+    def test_hash_find_in_if_condition(self):
+        source = 'data out; set in1; if h.find() = 0 then output; run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        unknowns = [s for s in step.statements if isinstance(s, ast.UnknownStatement)]
+        orphans = [u for u in unknowns if u.raw.strip().startswith("(")]
+        assert len(orphans) == 0
+
+    def test_hash_check_in_expression(self):
+        source = 'data out; set in1; found = (lookup.check() = 0); run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        unknowns = [s for s in step.statements if isinstance(s, ast.UnknownStatement)]
+        orphans = [u for u in unknowns if u.raw.strip().startswith("(")]
+        assert len(orphans) == 0
+
+    def test_chained_method_no_orphans(self):
+        source = 'data out; dcl hash h(); h.defineKey("key"); h.defineData("val"); h.defineDone(); run;'
+        result = ASTBuilder(source).build()
+        step = result.program.steps[0]
+        unknowns = [s for s in step.statements if isinstance(s, ast.UnknownStatement)]
+        orphans = [u for u in unknowns if u.raw.strip() == "( )"]
+        assert len(orphans) == 0
+
+
+class TestDoListLoop:
+    """B5: DO loop with comma-separated values should parse without errors."""
+
+    def test_do_list_strings(self):
+        source = "data out; set in1; do group = 'A', 'B', 'C'; x + 1; end; run;"
+        result = ASTBuilder(source).build()
+        assert len(result.errors) == 0
+        step = result.program.steps[0]
+        do_loops = [s for s in step.statements if isinstance(s, ast.DoLoop)]
+        assert len(do_loops) == 1
+        assert do_loops[0].var == "group"
+
+    def test_do_list_numbers(self):
+        source = "data out; set in1; do i = 1, 3, 5, 7; x = i * 2; end; run;"
+        result = ASTBuilder(source).build()
+        assert len(result.errors) == 0
+
+    def test_do_to_still_works(self):
+        source = "data out; set in1; do i = 1 to 10 by 2; x = i; end; run;"
+        result = ASTBuilder(source).build()
+        assert len(result.errors) == 0
+        step = result.program.steps[0]
+        do_loops = [s for s in step.statements if isinstance(s, ast.DoLoop)]
+        assert len(do_loops) == 1
+        assert do_loops[0].var == "i"
+        assert do_loops[0].end is not None  # has TO end
 
 
 class TestFixtures:

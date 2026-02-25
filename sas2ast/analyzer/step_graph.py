@@ -21,7 +21,7 @@ def extract_step_layer(source: str, graph: Optional[DependencyGraph] = None) -> 
     if graph is None:
         graph = DependencyGraph()
 
-    tokenizer = SASTokenizer(source)
+    tokenizer = SASTokenizer(source, skip_comments=True)
     tokens = tokenizer.tokenize()
     stream = TokenStream(tokens)
 
@@ -30,6 +30,11 @@ def extract_step_layer(source: str, graph: Optional[DependencyGraph] = None) -> 
 
     while not stream.at_end():
         tok = stream.current()
+
+        # Skip * line comments
+        if tok.type == TokenType.OPERATOR and tok.value == "*":
+            stream.skip_to_semi()
+            continue
 
         if tok.type == TokenType.MACRO_CALL:
             upper = tok.value.upper()
@@ -128,6 +133,11 @@ def _extract_data_step(
 
     while not stream.at_end():
         tok = stream.current()
+
+        # Skip * line comments inside DATA step body
+        if tok.type == TokenType.OPERATOR and tok.value == "*":
+            stream.skip_to_semi()
+            continue
 
         if tok.type == TokenType.WORD:
             upper = tok.value.upper()
@@ -532,11 +542,16 @@ def _build_step_edges(graph: DependencyGraph) -> None:
         for ref in step.writes:
             writers[ref.qualified_name.upper()] = step.id
 
-    # Create edges for readers
+    # Create edges for readers, deduplicating
+    seen: set = set()
     for step in graph.steps:
         for ref in step.reads:
             qn = ref.qualified_name.upper()
             if qn in writers and writers[qn] != step.id:
+                edge_key = (writers[qn], step.id, qn)
+                if edge_key in seen:
+                    continue
+                seen.add(edge_key)
                 edge = StepEdge(
                     source=writers[qn],
                     target=step.id,

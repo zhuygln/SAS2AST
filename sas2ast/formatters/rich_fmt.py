@@ -23,10 +23,10 @@ except ImportError:
     HAS_RICH = False
 
 
-def format_ast(result: ParseResult) -> str:
+def format_ast(result: ParseResult, filename: Optional[str] = None) -> str:
     """Render a ParseResult with Rich formatting, or fall back to tree."""
     if not HAS_RICH:
-        return _fallback_ast(result)
+        return _fallback_ast(result, filename=filename)
 
     d = result.to_dict()
     program = d.get("program")
@@ -36,7 +36,8 @@ def format_ast(result: ParseResult) -> str:
         return "(no program)"
 
     version = program.get("version", "")
-    tree = Tree(f"[bold cyan]Program[/bold cyan] (v{version})")
+    title = f"[bold cyan]AST: {filename}[/bold cyan] (v{version})" if filename else f"[bold cyan]Program[/bold cyan] (v{version})"
+    tree = Tree(title)
 
     for macro in program.get("macros", []):
         _add_node_to_tree(tree, macro)
@@ -57,10 +58,10 @@ def format_ast(result: ParseResult) -> str:
     return _render_rich(tree)
 
 
-def format_graph(graph: DependencyGraph) -> str:
+def format_graph(graph: DependencyGraph, filename: Optional[str] = None) -> str:
     """Render a DependencyGraph with Rich tables and tree."""
     if not HAS_RICH:
-        return _fallback_graph(graph)
+        return _fallback_graph(graph, filename=filename)
 
     console = Console(file=io.StringIO(), force_terminal=True, width=120)
 
@@ -144,6 +145,11 @@ def _add_node_to_tree(parent: Tree, node: dict) -> None:
         return
 
     ntype = node.get("_type", "Unknown")
+
+    # F2: Skip UnknownStatement with empty raw
+    if ntype == "UnknownStatement" and not node.get("raw", "").strip():
+        return
+
     label = _rich_label(node, ntype)
     branch = parent.add(label)
 
@@ -262,18 +268,43 @@ def _rich_label(node: dict, ntype: str) -> str:
     if ntype == "Where":
         return "[bold]Where[/bold]: <condition>"
 
+    if ntype == "Title":
+        text = node.get("text", "")
+        num = node.get("number")
+        label = f"Title{num}" if num else "Title"
+        if text:
+            display = text if len(text) <= 50 else text[:47] + "..."
+            return f"[bold cyan]{label}[/bold cyan]: {display}"
+        return f"[bold cyan]{label}[/bold cyan]"
+
+    if ntype == "IfThen":
+        cond = _expr_str(node.get("condition"))
+        return f"[bold]IfThen[/bold]: {cond}"
+
+    if ntype == "MacroLet":
+        name = node.get("name", "")
+        value = node.get("value", "")
+        if len(value) > 40:
+            value = value[:37] + "..."
+        return f"[yellow]%let[/yellow] {name} = {value}"
+
+    if ntype == "MacroPut":
+        text = node.get("text", "")
+        if len(text) > 50:
+            text = text[:47] + "..."
+        return f"[yellow]%put[/yellow] {text}"
+
     if ntype == "Libname":
         libref = node.get("libref", "")
         path = node.get("path", "")
         return f"[bold cyan]Libname[/bold cyan]: {libref} \u25b6 {path!r}" if path else f"[bold cyan]Libname[/bold cyan]: {libref}"
 
     if ntype == "ProcSql":
-        content = node.get("sql", "")
-        if len(content) > 60:
-            content = content[:57] + "..."
-        prefix = "SQL" if content.strip().upper().startswith(
+        full_content = node.get("sql", "")
+        prefix = "SQL" if full_content.strip().upper().startswith(
             ("SELECT", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "WITH")
         ) else "Statement"
+        content = full_content if len(full_content) <= 60 else full_content[:57] + "..."
         return f"[bold]{prefix}[/bold]: {content}"
 
     if ntype == "UnknownStatement":
@@ -320,13 +351,34 @@ def _expr_str(expr: Any) -> str:
             return expr.get("name", "?")
         if ntype == "Call":
             return f"{expr.get('name', '?')}(...)"
+        if ntype == "ArrayRef":
+            return f"{expr.get('name', '?')}[...]"
+        if ntype == "Literal":
+            val = expr.get("value")
+            return str(val) if val is not None else "."
+        if ntype == "MacroVar":
+            return f"&{expr.get('name', '?')}"
+        if ntype == "BinaryOp":
+            left = _expr_str(expr.get("left"))
+            right = _expr_str(expr.get("right"))
+            op = expr.get("op", "?")
+            return f"{left} {op} {right}"
+        if ntype == "UnaryOp":
+            operand = _expr_str(expr.get("operand"))
+            op = expr.get("op", "?")
+            return f"{op} {operand}"
     return "?"
 
 
 def _format_options(opts: dict) -> str:
     if not opts:
         return "{}"
-    parts = [f"{k}={v}" for k, v in opts.items()]
+    parts = []
+    for k, v in opts.items():
+        if v is True:
+            parts.append(k)
+        elif v is not False:
+            parts.append(f"{k}={v}")
     return ", ".join(parts)
 
 
@@ -341,21 +393,21 @@ def _render_rich(renderable: Any) -> str:
 # Fallback (when Rich is not installed)
 # ---------------------------------------------------------------------------
 
-def _fallback_ast(result: ParseResult) -> str:
+def _fallback_ast(result: ParseResult, filename: Optional[str] = None) -> str:
     import sys
     print(
         "Warning: 'rich' is not installed. Install with: pip install sas2ast[rich]",
         file=sys.stderr,
     )
     from sas2ast.formatters.tree import format_ast as tree_format
-    return tree_format(result)
+    return tree_format(result, filename=filename)
 
 
-def _fallback_graph(graph: DependencyGraph) -> str:
+def _fallback_graph(graph: DependencyGraph, filename: Optional[str] = None) -> str:
     import sys
     print(
         "Warning: 'rich' is not installed. Install with: pip install sas2ast[rich]",
         file=sys.stderr,
     )
     from sas2ast.formatters.tree import format_graph as tree_format
-    return tree_format(graph)
+    return tree_format(graph, filename=filename)

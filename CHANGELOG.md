@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-02-24
+
+### Added
+
+#### Parser (`sas2ast.parser`)
+- **`MacroLet` node** — `%let name = value;` now produces a typed `MacroLet(name, value)` AST node instead of `UnknownStatement`.
+- **`MacroPut` node** — `%put text;` now produces a typed `MacroPut(text)` AST node instead of `UnknownStatement`.
+- **Array element assignment** — `arr[i] = expr;` is now parsed as `Assignment` with an `ArrayRef` target instead of falling through to `UnknownStatement`. Uses bracket-aware lookahead and a new `_skip_brackets()` helper.
+
+### Fixed
+
+#### Parser (`sas2ast.parser`)
+- **Sum/accumulator statements** — `n+1;` (SAS sum statement, equivalent to `n = n + 1` with implicit RETAIN) caused `Expected EQUALS` parse errors. The `_parse_assignment()` had a `pass` placeholder for the `+` operator case. Now consumes the `+`, parses the expression, and produces `Assignment(target=Var("n"), expression=BinaryOp("+", Var("n"), Literal(1)))`.
+- **Hash method calls in expressions** — `h.Find()` inside expressions (e.g., `rc = h.find();`, `if h.find() = 0 then output;`) left orphaned `Unknown: ( )` and `Unknown: ( ) = 0 )` fragments (24 occurrences). The expression parser's `_parse_primary()` consumed `h.Find` as a dotted Var but left `()` behind. Now recognizes `identifier.method(args)` in expression context and produces `Call(name="h.Find", args=[])`.
+- **Hash method calls at statement level** — `h.defineKey("key")`, `h.output()`, and similar hash method calls caused `Expected EQUALS` parse errors and lost entire DATA steps via error recovery. The parser now distinguishes `identifier.method(args)` (method call) from `identifier.suffix = expr` (dotted assignment like `first.var = 1`). Method calls are captured as `UnknownStatement`, and dotted assignments now parse correctly with full dotted variable names.
+- **DO loop with comma-separated values** — `do group = 'A', 'B', 'C';` caused `Expected TO` parse errors. The parser now supports list-based DO loops in addition to the existing `DO var = start TO end` form.
+- **Length `$N.` format** — `length make $20.;` failed with `ValueError: invalid literal for int()` because (1) `$` was checked as `OPERATOR` but the tokenizer emits it as `WORD`, and (2) `int('20.')` fails on numbers with trailing dots. Fixed by accepting `$` as either token type and stripping trailing dots from numeric values.
+- **MacroDef duplication** — `MacroDef` nodes were added to both `program.macros` and `program.steps`. Now they only appear in `program.macros`, and `collect_macros()` in `lineage.py` reads from that list.
+
+#### Analyzer (`sas2ast.analyzer`)
+- **Line comments parsed as code** — `* comment;` style line comments were not skipped by the analyzer (only `/* */` block comments were filtered). Words inside `*` comments (e.g., `* data extra_dataset;`) could trigger phantom DATA steps or false dataset reads. Fixed by adding `skip_comments=True` to tokenizer calls and `*` line comment handling in `step_graph.py`, `macro_graph.py`, and `guards.py`.
+- **Duplicate edges** — The step graph could contain duplicate edges when a step read the same dataset multiple times (e.g., `set ds; merge ds;`). Added deduplication in `_build_step_edges()` (via `seen` set), `dataset_lineage()` (unique step IDs per dataset), and `to_dot()` (unique edge keys).
+
+#### Formatters (`sas2ast.formatters`)
+- **Inconsistent `filename` API** — `tree`, `json`, and `rich` formatters' `format_ast()` and `format_graph()` did not accept a `filename` parameter, while `html` and `summary` did. All five formatters now accept `filename: Optional[str] = None` with consistent behavior: tree shows `=== AST: file.sas ===` header, json adds a `"filename"` key, rich shows filename in the tree root.
+- **CLI not passing filename** — The `parse` and `analyze` CLI subcommands never passed the filename to formatters. Now all subcommands pass `filename=os.path.basename(args.file)`.
+- **Python `True`/`False` in options** — Boolean option flags like `NODUPKEY=True` now render as bare flags (`NODUPKEY`). `False` values are omitted entirely. Fixed `_format_options()` in all three formatters.
+- **Empty `Unknown:` nodes** — `UnknownStatement` with empty `raw` text no longer renders as `Unknown: ` with nothing after it. These nodes are now suppressed in all three formatters.
+- **SQL detection on truncated content** — SQL keyword detection (to choose between "SQL:" and "Statement:" prefix) was running on content already truncated to 57 chars, which could misclassify long SQL statements. Now checks the full content before truncating the display string.
+- **Title node shows no text** — `Title` nodes now display their text in HTML and Rich formatters (tree formatter already had this).
+- **IfThen shows no condition** — `IfThen` nodes now display an abbreviated condition expression (e.g., `IfThen: x > 1`) via enhanced `_expr_str()` helpers that handle `BinaryOp`, `UnaryOp`, `Literal`, and `MacroVar` nodes. Applied to all three formatters.
+- **New node labels** — Added formatter labels for `MacroLet` and `MacroPut` in all three formatters (html, tree, rich).
+
+### Changed
+- Test suite expanded from 309 to 361 tests (52 new tests covering all 16 fixes).
+- Generated outputs in all 6 formats (tree, json, summary, rich, html, dot) for all 42 fixture files. Verified zero parse errors, zero `=True`/`=False` artifacts, zero empty `Unknown:` nodes, zero orphaned `( )` fragments across all reports.
+
 ## [0.2.0] - 2026-02-23
 
 ### Added

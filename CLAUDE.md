@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 pip install -e ".[dev]"         # install with dev dependencies (pytest, arpeggio)
-pytest                          # run all 240+ tests
+pytest                          # run all 361+ tests
 pytest -v                       # verbose output
 pytest tests/parser/            # run parser tests only
 pytest tests/analyzer/          # run analyzer tests only
@@ -45,7 +45,7 @@ The project has three main packages sharing a common infrastructure layer:
 
 **`sas2ast/parser/`** (Plan A) — Full AST parser pipeline:
 - `visitor.py` — `ASTBuilder`: recursive-descent parser (~1500 lines), the core of Plan A. Consumes tokens from the shared tokenizer and builds a `Program` AST.
-- `ast_nodes.py` — 40+ typed AST node classes, all inheriting from `Node` with `to_dict()`
+- `ast_nodes.py` — 40+ typed AST node classes (including `MacroLet`, `MacroPut`, `ArrayRef`), all inheriting from `Node` with `to_dict()`
 - `macro_expander.py` — Two-pass engine: (1) register `%macro` defs + resolve `%let`, (2) expand calls via scope chain. Depth limit of 50.
 - `lineage.py` — `collect_datasets()`, `collect_macros()`, `collect_lineage()` over the AST
 - `grammar*.py` — Arpeggio PEG grammar files (currently secondary to the recursive-descent parser in `visitor.py`)
@@ -59,7 +59,7 @@ The project has three main packages sharing a common infrastructure layer:
 - `confidence.py` — Confidence scoring (literal=0.9, with libref=0.95, symbolic=0.4, guard reduction=0.3)
 - `guards.py` — `%if`/`%do` guard condition tracking
 - `graph_model.py` — `DependencyGraph`, `StepNode`, `StepEdge`, etc.
-- `exporters.py` — `to_json()`, `to_dict()`, `to_dot()`
+- `exporters.py` — `to_json()`, `to_dict()`, `to_dot()` (with edge deduplication)
 
 **`sas2ast/formatters/`** — Output formatters (lazy-loaded): tree, json, rich, html, summary.
 
@@ -68,6 +68,8 @@ The project has three main packages sharing a common infrastructure layer:
 - Both Plan A and Plan B share the same tokenizer (`common/tokens.py`) but diverge after tokenization
 - Plan A's parser is a hand-written recursive-descent parser (`visitor.py`), not Arpeggio-driven. The `grammar*.py` files define an Arpeggio PEG grammar but the main parse path uses `ASTBuilder`.
 - Macro expansion is optional (`parse(source, expand_macros=True)`) and happens as a text-level pre-pass before AST construction
+- `%let` and `%put` produce typed `MacroLet`/`MacroPut` nodes; array element assignments (`arr[i]=expr`) produce `Assignment` with `ArrayRef` target
+- `MacroDef` nodes live only in `program.macros`, not duplicated in `program.steps`
 - Unsupported constructs are preserved as `UnknownStatement`/`UnknownProcOption` (partial parsing, never fails completely)
 - Error recovery syncs to step boundaries (`RUN;`/`QUIT;`/`DATA`/`PROC`)
 - PROC SQL stores raw SQL text, not a sub-AST
@@ -76,6 +78,24 @@ The project has three main packages sharing a common infrastructure layer:
 ## Test Fixtures
 
 42 SAS fixture files in `sas_code/` organized by category: `data_step/`, `proc/`, `macro/`, `mixed/`, `deferred/`. Loaded via helpers in `tests/conftest.py`.
+
+## Generated Reports
+
+Pre-built HTML reports in `output/html/` (not checked into git):
+- `output/html/full/` — 42 combined AST + dependency graph reports (one per fixture file)
+- `output/html/{category}/` — 42 AST-only reports organized by fixture category
+
+Regenerate all reports:
+```python
+import glob, os, sas2ast
+from sas2ast.formatters import html
+for f in glob.glob('sas_code/**/*.sas', recursive=True):
+    name = os.path.splitext(os.path.basename(f))[0]
+    src = open(f).read()
+    result, graph = sas2ast.parse(src), sas2ast.analyze(src)
+    os.makedirs('output/html/full', exist_ok=True)
+    open(f'output/html/full/{name}.html','w').write(html.format_full(result, graph, filename=os.path.basename(f)))
+```
 
 ## Key Documents
 

@@ -15,7 +15,7 @@ def extract_guards(source: str, graph: DependencyGraph) -> None:
     Modifies graph in-place: sets guards on StepNodes based on
     their enclosing %if conditions.
     """
-    tokenizer = SASTokenizer(source)
+    tokenizer = SASTokenizer(source, skip_comments=True)
     tokens = tokenizer.tokenize()
     stream = TokenStream(tokens)
 
@@ -46,6 +46,11 @@ def _scan_for_guards(
     """Scan through tokens, tracking %if guard context."""
     while not stream.at_end():
         tok = stream.current()
+
+        # Skip * line comments
+        if tok.type == TokenType.OPERATOR and tok.value == "*":
+            stream.skip_to_semi()
+            continue
 
         if tok.type == TokenType.MACRO_CALL:
             upper = tok.value.upper()

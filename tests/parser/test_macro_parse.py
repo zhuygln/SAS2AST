@@ -52,6 +52,66 @@ class TestMacroCall:
         assert len(includes) == 1
 
 
+class TestMacroLet:
+    """P1: %let produces MacroLet node."""
+
+    def test_let_produces_macrolet(self):
+        source = "%let dsn = mydata;"
+        result = ASTBuilder(source).build()
+        lets = [s for s in result.program.steps if isinstance(s, ast.MacroLet)]
+        assert len(lets) == 1
+        assert lets[0].name == "dsn"
+        assert lets[0].value.strip() == "mydata"
+
+    def test_let_not_unknown(self):
+        source = "%let x = 10;"
+        result = ASTBuilder(source).build()
+        unknowns = [s for s in result.program.steps if isinstance(s, ast.UnknownStatement)]
+        assert len(unknowns) == 0
+
+    def test_let_in_macro(self):
+        source = "%macro test; %let x = hello; %mend;"
+        result = ASTBuilder(source).build()
+        assert len(result.program.macros) == 1
+
+
+class TestMacroPut:
+    """P2: %put produces MacroPut node."""
+
+    def test_put_produces_macroput(self):
+        source = "%put Hello World;"
+        result = ASTBuilder(source).build()
+        puts = [s for s in result.program.steps if isinstance(s, ast.MacroPut)]
+        assert len(puts) == 1
+        assert "Hello" in puts[0].text
+
+    def test_put_not_unknown(self):
+        source = "%put test message;"
+        result = ASTBuilder(source).build()
+        unknowns = [s for s in result.program.steps if isinstance(s, ast.UnknownStatement)]
+        assert len(unknowns) == 0
+
+
+class TestMacroDefDuplication:
+    """P4: MacroDef only in program.macros, not in program.steps."""
+
+    def test_macrodef_not_in_steps(self):
+        source = "%macro test; data out; run; %mend;"
+        result = ASTBuilder(source).build()
+        assert len(result.program.macros) == 1
+        # MacroDef should NOT appear in steps
+        macro_in_steps = [s for s in result.program.steps if isinstance(s, ast.MacroDef)]
+        assert len(macro_in_steps) == 0
+
+    def test_macrodef_to_dict(self):
+        """MacroDef should appear in macros list in to_dict output."""
+        source = "%macro test; data out; run; %mend;"
+        result = ASTBuilder(source).build()
+        d = result.program.to_dict()
+        assert len(d["macros"]) == 1
+        assert d["macros"][0]["_type"] == "MacroDef"
+
+
 class TestFixtures:
     def test_recursive_macros(self, sas_fixture):
         source = sas_fixture("macro", "recursive_macros")

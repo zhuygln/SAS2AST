@@ -397,3 +397,143 @@ class TestWithFixtures:
     def test_graph_summary_fixture(self, data_manip_graph):
         output = summary.format_graph(data_manip_graph)
         assert "Steps:" in output
+
+
+# ---- Fix verification tests ----
+
+class TestF1OptionsFormat:
+    """F1: Boolean options render as bare flags, not Python True/False."""
+
+    def test_html_options_true(self):
+        result = html._format_options({"NODUPKEY": True, "DATA": "input"})
+        assert "NODUPKEY" in result
+        assert "True" not in result
+        assert "DATA=input" in result
+
+    def test_html_options_false_omitted(self):
+        result = html._format_options({"NODUPKEY": True, "PRINT": False})
+        assert "PRINT" not in result
+        assert "False" not in result
+        assert "NODUPKEY" in result
+
+    def test_tree_options_true(self):
+        from sas2ast.formatters.tree import _format_options
+        result = _format_options({"NODUPKEY": True, "DATA": "input"})
+        assert "NODUPKEY" in result
+        assert "True" not in result
+
+    def test_proc_sort_nodupkey(self):
+        """PROC SORT with NODUPKEY should render as bare flag."""
+        result = sas2ast.parse("proc sort data=input nodupkey; by var; run;")
+        output = html.format_ast(result)
+        assert "NODUPKEY=True" not in output
+
+
+class TestF2EmptyUnknown:
+    """F2: Empty UnknownStatement nodes are suppressed."""
+
+    def test_html_empty_unknown_suppressed(self):
+        output = html._render_node_html({"_type": "UnknownStatement", "raw": ""})
+        assert output == ""
+
+    def test_html_nonempty_unknown_rendered(self):
+        output = html._render_node_html({"_type": "UnknownStatement", "raw": "x y z"})
+        assert "Unknown" in output
+        assert "x y z" in output
+
+    def test_tree_empty_unknown_suppressed(self):
+        from sas2ast.formatters.tree import _render_node
+        lines = []
+        _render_node({"_type": "UnknownStatement", "raw": ""}, lines, "", True)
+        assert len(lines) == 0
+
+
+class TestF3SqlDetection:
+    """F3: SQL detection runs on full content before truncation."""
+
+    def test_html_long_sql_detected(self):
+        long_sql = "SELECT " + ", ".join(f"col{i}" for i in range(30))
+        label = html._html_node_label({"_type": "ProcSql", "sql": long_sql}, "ProcSql")
+        assert "SQL" in label
+        assert "Statement" not in label
+
+    def test_tree_long_sql_detected(self):
+        from sas2ast.formatters.tree import _node_label
+        long_sql = "SELECT " + ", ".join(f"col{i}" for i in range(30))
+        label = _node_label({"_type": "ProcSql", "sql": long_sql})
+        assert label.startswith("SQL:")
+
+
+class TestF4TitleText:
+    """F4: Title node shows text."""
+
+    def test_html_title_text(self):
+        label = html._html_node_label(
+            {"_type": "Title", "text": "My Report", "number": None},
+            "Title",
+        )
+        assert "My Report" in label
+
+    def test_html_title_number(self):
+        label = html._html_node_label(
+            {"_type": "Title", "text": "Sub Title", "number": 2},
+            "Title",
+        )
+        assert "Title2" in label
+        assert "Sub Title" in label
+
+
+class TestF5IfThenCondition:
+    """F5: IfThen shows condition info."""
+
+    def test_html_ifthen_condition(self):
+        label = html._html_node_label(
+            {"_type": "IfThen", "condition": {"_type": "BinaryOp", "op": ">",
+             "left": {"_type": "Var", "name": "x"}, "right": {"_type": "Literal", "value": 1}}},
+            "IfThen",
+        )
+        assert "IfThen" in label
+        assert "x" in label
+
+    def test_tree_ifthen_condition(self):
+        from sas2ast.formatters.tree import _node_label
+        label = _node_label(
+            {"_type": "IfThen", "condition": {"_type": "BinaryOp", "op": ">",
+             "left": {"_type": "Var", "name": "x"}, "right": {"_type": "Literal", "value": 1}}},
+        )
+        assert "IfThen" in label
+        assert "x" in label
+        assert "1" in label
+
+
+class TestP1P2MacroLetPut:
+    """P1/P2: MacroLet and MacroPut node labels."""
+
+    def test_html_macrolet_label(self):
+        label = html._html_node_label(
+            {"_type": "MacroLet", "name": "dsn", "value": "mydata"},
+            "MacroLet",
+        )
+        assert "%let" in label
+        assert "dsn" in label
+        assert "mydata" in label
+
+    def test_html_macroput_label(self):
+        label = html._html_node_label(
+            {"_type": "MacroPut", "text": "Hello World"},
+            "MacroPut",
+        )
+        assert "%put" in label
+        assert "Hello World" in label
+
+    def test_tree_macrolet_label(self):
+        from sas2ast.formatters.tree import _node_label
+        label = _node_label({"_type": "MacroLet", "name": "dsn", "value": "mydata"})
+        assert "%let" in label
+        assert "dsn" in label
+
+    def test_tree_macroput_label(self):
+        from sas2ast.formatters.tree import _node_label
+        label = _node_label({"_type": "MacroPut", "text": "Hello World"})
+        assert "%put" in label
+        assert "Hello World" in label

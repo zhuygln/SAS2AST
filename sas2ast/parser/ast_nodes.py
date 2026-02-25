@@ -368,6 +368,17 @@ class MacroParam(Node):
 
 
 @dataclass
+class MacroLet(Statement):
+    name: str = ""
+    value: str = ""
+
+
+@dataclass
+class MacroPut(Statement):
+    text: str = ""
+
+
+@dataclass
 class MacroDef(Statement):
     name: str = ""
     params: List[MacroParam] = field(default_factory=list)

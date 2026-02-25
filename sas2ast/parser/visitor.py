@@ -42,7 +42,6 @@ class ASTBuilder:
                 if item is not None:
                     if isinstance(item, ast.MacroDef):
                         program.macros.append(item)
-                        program.steps.append(item)
                     elif isinstance(item, ast.Step):
                         program.steps.append(item)
                     elif isinstance(item, ast.Statement):
@@ -353,9 +352,30 @@ class ASTBuilder:
 
         # Check for assignment: identifier = expr ;
         if self._peek(1) and (self._peek(1).type == TokenType.EQUALS or
-                                (self._peek(1).type == TokenType.OPERATOR and self._peek(1).value == "+") or
-                                (self._peek(1).type == TokenType.DOT)):
+                                (self._peek(1).type == TokenType.OPERATOR and self._peek(1).value == "+")):
             return self._parse_assignment()
+
+        # Check for dotted identifier: first.var = expr  OR  h.method(args);
+        if self._peek(1) and self._peek(1).type == TokenType.DOT:
+            # Lookahead: identifier DOT word LPAREN → method call (hash object etc.)
+            p2 = self._peek(2)
+            p3 = self._peek(3)
+            if p2 and p2.type == TokenType.WORD and p3 and p3.type == TokenType.LPAREN:
+                # Method call like h.defineKey("key"), h.output(), h.find()
+                raw = self._skip_to_semi()
+                return ast.UnknownStatement(raw=raw, line=tok.line, col=tok.col)
+            # Otherwise it's a dotted assignment like first.var = 1
+            return self._parse_assignment()
+
+        # Check for array element assignment: arr[i] = expr ;
+        if self._peek(1) and self._peek(1).value == "[":
+            save_pos = self.pos
+            self._advance()  # identifier
+            self._skip_brackets()
+            if self._current() and self._current().type == TokenType.EQUALS:
+                self.pos = save_pos
+                return self._parse_assignment()
+            self.pos = save_pos
 
         # Check for subsetting IF (no THEN): if expr;
         # Check for function call form: identifier(...) = expr;
@@ -384,6 +404,21 @@ class ASTBuilder:
             if tok.type == TokenType.LPAREN:
                 depth += 1
             elif tok.type == TokenType.RPAREN:
+                depth -= 1
+                if depth == 0:
+                    return
+
+    def _skip_brackets(self):
+        """Skip balanced square brackets (tokenized as WORD [ and ])."""
+        tok = self._current()
+        if not tok or tok.value != "[":
+            return
+        depth = 0
+        while not self._at_end():
+            tok = self._advance()
+            if tok.value == "[":
+                depth += 1
+            elif tok.value == "]":
                 depth -= 1
                 if depth == 0:
                     return
@@ -494,20 +529,29 @@ class ASTBuilder:
             body = self._parse_do_body()
             return ast.DoSimple(body=body, line=line, col=col)
 
-        # DO var = start TO end [BY step];
+        # DO var = start TO end [BY step];  or  DO var = val1, val2, val3;
         if (next_tok.type == TokenType.WORD and
                 self._peek(1) and self._peek(1).type == TokenType.EQUALS):
             var_name = self._advance().value
             self._expect_type(TokenType.EQUALS)
             start = self._parse_simple_expression()
-            self._expect_word("TO")
-            end = self._parse_simple_expression()
-            by = None
-            if self._match_word("BY"):
-                by = self._parse_simple_expression()
+            # Check for TO (iterative) vs comma (list-based)
+            if self._match_word("TO"):
+                end = self._parse_simple_expression()
+                by = None
+                if self._match_word("BY"):
+                    by = self._parse_simple_expression()
+                self._match_type(TokenType.SEMI)
+                body = self._parse_do_body()
+                return ast.DoLoop(var=var_name, start=start, end=end, by=by,
+                                  body=body, line=line, col=col)
+            # List-based DO: do var = 'A', 'B', 'C';
+            # Already parsed first value as `start`, consume remaining comma-separated values
+            while self._match_type(TokenType.COMMA):
+                self._parse_simple_expression()
             self._match_type(TokenType.SEMI)
             body = self._parse_do_body()
-            return ast.DoLoop(var=var_name, start=start, end=end, by=by,
+            return ast.DoLoop(var=var_name, start=start, end=None, by=None,
                               body=body, line=line, col=col)
 
         # Plain DO;
@@ -582,8 +626,14 @@ class ASTBuilder:
         tok = self._current()
         stmt = ast.Assignment(line=tok.line, col=tok.col)
 
-        # Parse target (var or func call form)
+        # Parse target (var or func call form or array ref)
         target_name = self._advance().value
+
+        # Handle dotted name: first.var, last.var
+        if self._current() and self._current().type == TokenType.DOT:
+            self._advance()  # skip DOT
+            if self._current() and self._current().type == TokenType.WORD:
+                target_name += "." + self._advance().value
 
         # Check for function form: substr(x,1,3) = value
         if self._current() and self._current().type == TokenType.LPAREN:
@@ -591,12 +641,27 @@ class ASTBuilder:
             args = self._parse_arg_list()
             self._expect_type(TokenType.RPAREN)
             stmt.target = ast.Call(name=target_name, args=args)
+        # Check for array ref: arr[i] = value
+        elif self._current() and self._current().value == "[":
+            self._advance()  # consume [
+            index = self._parse_arg_list()
+            # consume ]
+            if self._current() and self._current().value == "]":
+                self._advance()
+            stmt.target = ast.ArrayRef(name=target_name, index=index)
         else:
-            # Handle accumulated sum: var + expr
-            if self._current() and self._current().type == TokenType.OPERATOR and self._current().value == "+":
-                # n + 1 form (sum statement)
-                pass
             stmt.target = ast.Var(name=target_name)
+            # Handle accumulated sum: var + expr  (equivalent to var = var + expr)
+            if self._current() and self._current().type == TokenType.OPERATOR and self._current().value == "+":
+                op = self._advance().value  # consume +
+                right = self._parse_simple_expression()
+                stmt.expression = ast.BinaryOp(
+                    op=op,
+                    left=ast.Var(name=target_name),
+                    right=right,
+                )
+                self._match_type(TokenType.SEMI)
+                return stmt
 
         self._expect_type(TokenType.EQUALS)
         stmt.expression = self._parse_simple_expression()
@@ -674,14 +739,19 @@ class ASTBuilder:
                 self._advance()
                 # Check for $ or number
                 length_val: Any = 8
-                if self._current() and self._current().type == TokenType.OPERATOR and self._current().value == "$":
+                is_dollar = (self._current() and
+                             self._current().value == "$" and
+                             self._current().type in (TokenType.OPERATOR, TokenType.WORD))
+                if is_dollar:
                     self._advance()
                     if self._current() and self._current().type == TokenType.NUMBER:
-                        length_val = "$" + self._advance().value
+                        num_str = self._advance().value.rstrip(".")
+                        length_val = "$" + num_str
                     else:
                         length_val = "$8"
                 elif self._current() and self._current().type == TokenType.NUMBER:
-                    length_val = int(self._advance().value)
+                    num_str = self._advance().value.rstrip(".")
+                    length_val = int(num_str) if num_str else 8
                 stmt.vars.append((name, length_val))
                 continue
             self._advance()
@@ -1066,11 +1136,11 @@ class ASTBuilder:
                 name = self._advance().value
             self._match_type(TokenType.EQUALS)
             value = self._skip_to_semi()
-            return ast.UnknownStatement(raw=f"%let {name} = {value}", line=tok.line, col=tok.col)
+            return ast.MacroLet(name=name, value=value, line=tok.line, col=tok.col)
         if upper == "%PUT":
             self._advance()
-            value = self._skip_to_semi()
-            return ast.UnknownStatement(raw=f"%put {value}", line=tok.line, col=tok.col)
+            text = self._skip_to_semi()
+            return ast.MacroPut(text=text, line=tok.line, col=tok.col)
         if upper == "%INCLUDE":
             self._advance()
             path = ""
@@ -1367,11 +1437,17 @@ class ASTBuilder:
                 return ast.Call(name=name, args=args)
 
             # Check for array ref: name[...]  (rare in SAS, more common with {})
-            # Check for first./last. syntax
+            # Check for first./last. syntax and method calls: obj.method(...)
             if self._current() and self._current().type == TokenType.DOT:
                 self._advance()
                 if self._current() and self._current().type == TokenType.WORD:
                     suffix = self._advance().value
+                    # Check for method call: obj.method(...)
+                    if self._current() and self._current().type == TokenType.LPAREN:
+                        self._advance()
+                        method_args = self._parse_arg_list()
+                        self._match_type(TokenType.RPAREN)
+                        return ast.Call(name=f"{name}.{suffix}", args=method_args)
                     return ast.Var(name=f"{name}.{suffix}")
                 return ast.Var(name=name)
 

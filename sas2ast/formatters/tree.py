@@ -16,17 +16,23 @@ _DASH = "\u2500"    # ─
 _ARROW = "\u25b6"   # ▶
 
 
-def format_ast(result: ParseResult) -> str:
+def format_ast(result: ParseResult, filename: Optional[str] = None) -> str:
     """Render a ParseResult as a plain-text indented tree."""
     d = result.to_dict()
     lines: List[str] = []
+    if filename:
+        lines.append(f"=== AST: {filename} ===")
+        lines.append("")
     _render_parse_result(d, lines)
     return "\n".join(lines)
 
 
-def format_graph(graph: DependencyGraph) -> str:
+def format_graph(graph: DependencyGraph, filename: Optional[str] = None) -> str:
     """Render a DependencyGraph as plain-text sections."""
     lines: List[str] = []
+    if filename:
+        lines.append(f"=== Graph: {filename} ===")
+        lines.append("")
     _render_step_flow(graph, lines)
     _render_edges(graph, lines)
     _render_macros(graph, lines)
@@ -65,10 +71,15 @@ def _render_node(node: Any, lines: List[str], prefix: str, is_last: bool) -> Non
     if not isinstance(node, dict):
         return
 
+    node_type = node.get("_type", "Unknown")
+
+    # F2: Skip UnknownStatement with empty raw
+    if node_type == "UnknownStatement" and not node.get("raw", "").strip():
+        return
+
     connector = f"{_ELBOW}{_DASH}{_DASH} " if is_last else f"{_TEE}{_DASH}{_DASH} "
     child_prefix = prefix + ("    " if is_last else f"{_PIPE}   ")
 
-    node_type = node.get("_type", "Unknown")
     label = _node_label(node)
     lines.append(f"{prefix}{connector}{label}")
 
@@ -141,7 +152,8 @@ def _node_label(node: dict) -> str:
         return f"Where: <condition>"
 
     if ntype == "IfThen":
-        return "IfThen"
+        cond = _expr_str(node.get("condition"))
+        return f"IfThen: {cond}"
 
     if ntype in ("DoLoop", "DoWhile", "DoUntil", "DoSimple"):
         return ntype
@@ -196,12 +208,11 @@ def _node_label(node: dict) -> str:
         return f"Include: {node.get('path', '')}"
 
     if ntype == "ProcSql":
-        content = node.get("sql", "")
-        if len(content) > 60:
-            content = content[:57] + "..."
-        prefix = "SQL" if content.strip().upper().startswith(
+        full_content = node.get("sql", "")
+        prefix = "SQL" if full_content.strip().upper().startswith(
             ("SELECT", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "WITH")
         ) else "Statement"
+        content = full_content if len(full_content) <= 60 else full_content[:57] + "..."
         return f"{prefix}: {content}"
 
     if ntype == "Infile":
@@ -221,6 +232,19 @@ def _node_label(node: dict) -> str:
 
     if ntype == "Cards":
         return "Cards"
+
+    if ntype == "MacroLet":
+        name = node.get("name", "")
+        value = node.get("value", "")
+        if len(value) > 40:
+            value = value[:37] + "..."
+        return f"%let {name} = {value}"
+
+    if ntype == "MacroPut":
+        text = node.get("text", "")
+        if len(text) > 50:
+            text = text[:47] + "..."
+        return f"%put {text}"
 
     if ntype == "UnknownStatement":
         raw = node.get("raw", "")
@@ -438,11 +462,30 @@ def _expr_str(expr: Any) -> str:
             return f"{expr.get('name', '?')}(...)"
         if ntype == "ArrayRef":
             return f"{expr.get('name', '?')}[...]"
+        if ntype == "Literal":
+            val = expr.get("value")
+            return str(val) if val is not None else "."
+        if ntype == "MacroVar":
+            return f"&{expr.get('name', '?')}"
+        if ntype == "BinaryOp":
+            left = _expr_str(expr.get("left"))
+            right = _expr_str(expr.get("right"))
+            op = expr.get("op", "?")
+            return f"{left} {op} {right}"
+        if ntype == "UnaryOp":
+            operand = _expr_str(expr.get("operand"))
+            op = expr.get("op", "?")
+            return f"{op} {operand}"
     return "?"
 
 
 def _format_options(opts: dict) -> str:
     if not opts:
         return "{}"
-    parts = [f"{k}={v}" for k, v in opts.items()]
+    parts = []
+    for k, v in opts.items():
+        if v is True:
+            parts.append(k)
+        elif v is not False:
+            parts.append(f"{k}={v}")
     return ", ".join(parts)

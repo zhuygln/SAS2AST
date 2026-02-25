@@ -31,7 +31,7 @@ def format_ast(result: ParseResult, filename: Optional[str] = None) -> str:
         if stype == "DataStep":
             step_counts["DATA"] += 1
         elif stype == "ProcStep":
-            proc_name = d.get("name", "UNKNOWN")
+            proc_name = d.get("name", "UNKNOWN").upper()
             step_counts[f"PROC {proc_name}"] += 1
         else:
             step_counts[stype] += 1

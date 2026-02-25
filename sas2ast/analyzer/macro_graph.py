@@ -35,7 +35,7 @@ def extract_macro_layer(source: str) -> DependencyGraph:
     Returns a DependencyGraph populated with macro_defs, macro_calls,
     and macro_var_flow.
     """
-    tokenizer = SASTokenizer(source)
+    tokenizer = SASTokenizer(source, skip_comments=True)
     tokens = tokenizer.tokenize()
     stream = TokenStream(tokens)
 
@@ -45,6 +45,11 @@ def extract_macro_layer(source: str) -> DependencyGraph:
 
     while not stream.at_end():
         tok = stream.current()
+
+        # Skip * line comments
+        if tok.type == TokenType.OPERATOR and tok.value == "*":
+            stream.skip_to_semi()
+            continue
 
         if tok.type == TokenType.MACRO_CALL:
             upper = tok.value.upper()

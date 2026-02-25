@@ -33,7 +33,8 @@ def _parse_cmd(args: argparse.Namespace) -> int:
     if formatter is None:
         return 1
 
-    output = formatter.format_ast(result)
+    filename = os.path.basename(args.file)
+    output = formatter.format_ast(result, filename=filename)
     _write_output(output, args.output)
     return 0
 
@@ -62,7 +63,8 @@ def _analyze_cmd(args: argparse.Namespace) -> int:
     if formatter is None:
         return 1
 
-    output = formatter.format_graph(graph)
+    filename = os.path.basename(args.file)
+    output = formatter.format_graph(graph, filename=filename)
     _write_output(output, args.output)
     return 0
 
@@ -103,15 +105,12 @@ def _batch_cmd(args: argparse.Namespace) -> int:
 
         if fmt_name == "json":
             graph = analyze(source)
-            output = formatter.format_graph(graph)
-            outputs.append(f"// {relpath}\n{output}")
+            output = formatter.format_graph(graph, filename=relpath)
+            outputs.append(output)
         else:
             # Default: summary of both parse and analyze
             result = parse(source)
-            if hasattr(formatter, "format_ast"):
-                output = formatter.format_ast(result, filename=relpath)
-            else:
-                output = formatter.format_ast(result)
+            output = formatter.format_ast(result, filename=relpath)
             outputs.append(output)
 
     final = "\n\n".join(outputs)

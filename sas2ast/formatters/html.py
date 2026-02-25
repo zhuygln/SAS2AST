@@ -287,6 +287,11 @@ def _render_node_html(node: dict) -> str:
         return html_lib.escape(str(node))
 
     ntype = node.get("_type", "Unknown")
+
+    # F2: Skip UnknownStatement with empty raw
+    if ntype == "UnknownStatement" and not node.get("raw", "").strip():
+        return ""
+
     label = _html_node_label(node, ntype)
     children = _html_node_children(node, ntype)
 
@@ -347,11 +352,36 @@ def _html_node_label(node: dict, ntype: str) -> str:
         path = e(node.get("path", ""))
         return f'<span class="node-type">Libname</span>: {libref} \u25b6 {path}'
 
+    if ntype == "Title":
+        text = node.get("text", "")
+        num = node.get("number")
+        label = f"Title{num}" if num else "Title"
+        if text:
+            display = text if len(text) <= 50 else text[:47] + "..."
+            return f'<span class="node-type">{label}</span>: {e(display)}'
+        return f'<span class="node-type">{label}</span>'
+
+    if ntype == "IfThen":
+        cond = _html_expr_str(node.get("condition"))
+        return f'<span class="node-type">IfThen</span>: {cond}'
+
+    if ntype == "MacroLet":
+        name = e(node.get("name", ""))
+        value = e(node.get("value", ""))
+        if len(value) > 40:
+            value = value[:37] + "..."
+        return f'<span class="keyword">%let</span> {name} = {value}'
+
+    if ntype == "MacroPut":
+        text = e(node.get("text", ""))
+        if len(text) > 50:
+            text = text[:47] + "..."
+        return f'<span class="keyword">%put</span> {text}'
+
     if ntype == "ProcSql":
-        content = node.get("sql", "")
-        if len(content) > 60:
-            content = content[:57] + "..."
-        prefix = "SQL" if content.strip().upper().startswith(_SQL_KEYWORDS) else "Statement"
+        full_content = node.get("sql", "")
+        prefix = "SQL" if full_content.strip().upper().startswith(_SQL_KEYWORDS) else "Statement"
+        content = full_content if len(full_content) <= 60 else full_content[:57] + "..."
         return f'<span class="node-type">{prefix}</span>: {e(content)}'
 
     if ntype == "UnknownStatement":
@@ -612,11 +642,32 @@ def _html_expr_str(expr: Any) -> str:
             return html_lib.escape(expr.get("name", "?"))
         if ntype == "Call":
             return html_lib.escape(f"{expr.get('name', '?')}(...)")
+        if ntype == "ArrayRef":
+            return html_lib.escape(f"{expr.get('name', '?')}[...]")
+        if ntype == "Literal":
+            val = expr.get("value")
+            return html_lib.escape(str(val)) if val is not None else "."
+        if ntype == "MacroVar":
+            return html_lib.escape(f"&amp;{expr.get('name', '?')}")
+        if ntype == "BinaryOp":
+            left = _html_expr_str(expr.get("left"))
+            right = _html_expr_str(expr.get("right"))
+            op = html_lib.escape(expr.get("op", "?"))
+            return f"{left} {op} {right}"
+        if ntype == "UnaryOp":
+            operand = _html_expr_str(expr.get("operand"))
+            op = html_lib.escape(expr.get("op", "?"))
+            return f"{op} {operand}"
     return "?"
 
 
 def _format_options(opts: dict) -> str:
     if not opts:
         return "{}"
-    parts = [f"{k}={v}" for k, v in opts.items()]
+    parts = []
+    for k, v in opts.items():
+        if v is True:
+            parts.append(k)
+        elif v is not False:
+            parts.append(f"{k}={v}")
     return ", ".join(parts)

@@ -65,8 +65,13 @@ def to_dot(graph: DependencyGraph) -> str:
 
     lines.append("")
 
-    # Step edges
+    # Step edges (deduplicated)
+    seen_edges: set = set()
     for edge in graph.step_edges:
+        edge_key = (edge.source, edge.target, edge.dataset)
+        if edge_key in seen_edges:
+            continue
+        seen_edges.add(edge_key)
         style = "solid"
         if edge.guard:
             style = "dashed"

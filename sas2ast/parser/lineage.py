@@ -111,16 +111,18 @@ def collect_macros(result: ast.ParseResult) -> List[MacroEntry]:
     if not result.program:
         return entries
 
+    # Collect macro definitions from program.macros
+    for macro in result.program.macros:
+        entries.append(MacroEntry(
+            name=macro.name,
+            kind="definition",
+            params=[p.name for p in macro.params],
+            line=macro.line,
+            col=macro.col,
+        ))
+
     for step in result.program.steps:
-        if isinstance(step, ast.MacroDef):
-            entries.append(MacroEntry(
-                name=step.name,
-                kind="definition",
-                params=[p.name for p in step.params],
-                line=step.line,
-                col=step.col,
-            ))
-        elif isinstance(step, ast.MacroCall):
+        if isinstance(step, ast.MacroCall):
             entries.append(MacroEntry(
                 name=step.name,
                 kind="call",

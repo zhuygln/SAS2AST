@@ -202,6 +202,70 @@ data out; merge a b; run;
         assert len(graph.step_edges) == 4
 
 
+class TestLineComments:
+    """A1: Line comments (* ...;) should not produce phantom steps."""
+
+    def test_star_comment_not_data_step(self):
+        """Words in * comments should not trigger step detection."""
+        source = """\
+* This is a comment mentioning data and proc;
+data real; set input; run;
+"""
+        graph = extract_step_layer(source)
+        assert len(graph.steps) == 1
+        assert graph.steps[0].kind == "DATA"
+
+    def test_star_comment_in_data_step(self):
+        """* comments inside DATA step body should not trigger reads."""
+        source = """\
+data out;
+    set input;
+    * data extra_dataset;
+    x = 1;
+run;
+"""
+        graph = extract_step_layer(source)
+        step = graph.steps[0]
+        read_names = [r.name for r in step.reads]
+        assert "extra_dataset" not in read_names
+
+    def test_block_comment_not_data_step(self):
+        """/* */ comments should not trigger step detection."""
+        source = """\
+/* data phantom; set foo; run; */
+data real; set input; run;
+"""
+        graph = extract_step_layer(source)
+        assert len(graph.steps) == 1
+        assert graph.steps[0].kind == "DATA"
+
+
+class TestDedupEdges:
+    """A2: Duplicate edges should be deduplicated."""
+
+    def test_no_duplicate_edges(self):
+        """Multiple reads of same dataset from same step should not produce duplicate edges."""
+        source = """\
+data intermediate; set raw; run;
+data out; set intermediate; merge intermediate; run;
+"""
+        graph = extract_step_layer(source)
+        # Should have at most 1 edge from step_1 to step_2 via INTERMEDIATE
+        edge_keys = [(e.source, e.target, e.dataset.upper()) for e in graph.step_edges]
+        assert len(edge_keys) == len(set(edge_keys))
+
+    def test_lineage_dedup(self):
+        """dataset_lineage should not have duplicate step IDs."""
+        source = """\
+data out; set raw; merge raw; run;
+"""
+        graph = extract_step_layer(source)
+        lineage = graph.dataset_lineage()
+        for ds_name, info in lineage.items():
+            assert len(info["readers"]) == len(set(info["readers"]))
+            assert len(info["writers"]) == len(set(info["writers"]))
+
+
 class TestMacroContext:
     def test_step_in_macro(self):
         source = """\

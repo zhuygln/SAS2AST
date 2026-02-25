@@ -258,12 +258,14 @@ class DependencyGraph:
                 qn = ref.qualified_name.upper()
                 if qn not in lineage:
                     lineage[qn] = {"writers": [], "readers": []}
-                lineage[qn]["writers"].append(step.id)
+                if step.id not in lineage[qn]["writers"]:
+                    lineage[qn]["writers"].append(step.id)
             for ref in step.reads:
                 qn = ref.qualified_name.upper()
                 if qn not in lineage:
                     lineage[qn] = {"writers": [], "readers": []}
-                lineage[qn]["readers"].append(step.id)
+                if step.id not in lineage[qn]["readers"]:
+                    lineage[qn]["readers"].append(step.id)
         return lineage
 
     def step_pdg(self, step_id: str) -> Optional[StepPDG]:
