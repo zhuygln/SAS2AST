@@ -79,22 +79,52 @@ The project has three main packages sharing a common infrastructure layer:
 
 42 SAS fixture files in `sas_code/` organized by category: `data_step/`, `proc/`, `macro/`, `mixed/`, `deferred/`. Loaded via helpers in `tests/conftest.py`.
 
-## Generated Reports
+## Generated Outputs
 
-Pre-built HTML reports in `output/html/` (not checked into git):
-- `output/html/full/` — 42 combined AST + dependency graph reports (one per fixture file)
-- `output/html/{category}/` — 42 AST-only reports organized by fixture category
+Pre-built outputs in `output/` (gitignored, not checked in). 336 files across 6 formats for all 42 fixtures:
 
-Regenerate all reports:
+| Format | Directory | Files | Description |
+|--------|-----------|-------|-------------|
+| **tree** | `output/tree/` | 84 (`*_ast.txt`, `*_graph.txt`) | Indented text tree of AST nodes and dependency graph |
+| **json** | `output/json/` | 84 (`*_ast.json`, `*_graph.json`) | Full JSON serialization with all node details |
+| **summary** | `output/summary/` | 84 (`*_ast.txt`, `*_graph.txt`) | Compact counts: steps, macros, datasets, edges |
+| **rich** | `output/rich/` | 84 (`*_ast.txt`, `*_graph.txt`) | Rich terminal tree (plain text when written to file) |
+| **html** | `output/html/full/` + `output/html/{category}/` | 84 | Interactive HTML reports with collapsible sections |
+| **dot** | `output/dot/` | 42 (`.dot`) | Graphviz DOT graph (render with `dot -Tpng file.dot -o file.png`) |
+
+### Format Comparison for Codebase Context
+
+When using output as supplementary context alongside raw SAS source (e.g., for LLM prompts or documentation):
+
+- **Best overall: `tree` (AST + Graph combined)** — 0.58x source size, captures execution flow, macro signatures, dataset lineage, and dependency edges in a human/LLM-readable indented format.
+- **Best for data flow: `tree` Graph** — step flow, edges (`step_1 ──[test]──▶ step_2`), recursive call detection, dataset lineage.
+- **Best for completeness: `json` Graph** — macro variable def-use flows, confidence scores, guard conditions, scope tracking. But 4x+ source size.
+- **Best for quick overview: `summary` Graph** — 5 lines per file with step/macro/dataset/edge counts.
+- **Best for visualization: `dot`** — render to PNG/SVG via Graphviz.
+
+### Regenerate All Outputs
+
 ```python
 import glob, os, sas2ast
-from sas2ast.formatters import html
+from sas2ast.formatters import html, tree, json_fmt, summary
+
 for f in glob.glob('sas_code/**/*.sas', recursive=True):
     name = os.path.splitext(os.path.basename(f))[0]
+    fname = os.path.basename(f)
     src = open(f).read()
     result, graph = sas2ast.parse(src), sas2ast.analyze(src)
+
+    for fmt, ext in [('tree', '.txt'), ('json', '.json'), ('summary', '.txt'), ('rich', '.txt')]:
+        mod = sas2ast.get_formatter(fmt)
+        for kind, fn in [('ast', mod.format_ast), ('graph', mod.format_graph)]:
+            os.makedirs(f'output/{fmt}', exist_ok=True)
+            open(f'output/{fmt}/{name}_{kind}{ext}', 'w').write(fn(result if kind == 'ast' else graph, filename=fname))
+
     os.makedirs('output/html/full', exist_ok=True)
-    open(f'output/html/full/{name}.html','w').write(html.format_full(result, graph, filename=os.path.basename(f)))
+    open(f'output/html/full/{name}.html', 'w').write(html.format_full(result, graph, filename=fname))
+
+    os.makedirs('output/dot', exist_ok=True)
+    open(f'output/dot/{name}.dot', 'w').write(graph.to_dot())
 ```
 
 ## Key Documents

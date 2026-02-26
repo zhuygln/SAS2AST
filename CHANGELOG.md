@@ -40,7 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Test suite expanded from 309 to 361 tests (52 new tests covering all 16 fixes).
-- Generated outputs in all 6 formats (tree, json, summary, rich, html, dot) for all 42 fixture files. Verified zero parse errors, zero `=True`/`=False` artifacts, zero empty `Unknown:` nodes, zero orphaned `( )` fragments across all reports.
+- Generated outputs in all 6 formats (tree, json, summary, rich, html, dot) for all 42 fixture files (336 output files total). Verified zero parse errors, zero `=True`/`=False` artifacts, zero empty `Unknown:` nodes, zero orphaned `( )` fragments across all reports.
+- Added `output/` to `.gitignore` (generated outputs are not checked in).
+- Updated `CLAUDE.md` with full output format documentation, format comparison for codebase context use, and regeneration script covering all 6 formats.
 
 ## [0.2.0] - 2026-02-23
 
