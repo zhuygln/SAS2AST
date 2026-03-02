@@ -101,6 +101,8 @@ result = parse("""
 | `sas2ast.parse(source)` | Parse SAS source into a `ParseResult` (Plan A) |
 | `sas2ast.analyze(source)` | Analyze SAS source into a `DependencyGraph` (Plan B) |
 | `sas2ast.analyze_files(paths)` | Analyze multiple files and merge graphs (Plan B) |
+| `sas2ast.get_formatter(name)` | Lazy-load a formatter module by name |
+| `sas2ast.AVAILABLE_FORMATS` | List of available format names |
 
 ### Plan A: Parser (`sas2ast.parser`)
 
@@ -215,7 +217,7 @@ The HTML formatter's `format_full()` produces a combined report with:
 ```
 sas2ast/
 ├── __init__.py                 # Top-level API: parse(), analyze(), analyze_files()
-├── _version.py                 # "0.1.0"
+├── _version.py                 # "0.2.1"
 ├── cli.py                      # CLI entry point (parse, analyze, batch)
 ├── common/                     # Shared infrastructure
 │   ├── tokens.py               # SASTokenizer (string/comment/CARDS-aware)
@@ -253,7 +255,7 @@ sas2ast/
     ├── html.py                 # Self-contained HTML reports
     └── rich_fmt.py             # Rich terminal output (optional)
 
-tests/                          # 309 tests
+tests/                          # 361 tests
 ├── conftest.py                 # Fixture loading helpers
 ├── common/                     # Tokenizer and model tests
 ├── parser/                     # AST parser, expressions, lineage, macros
