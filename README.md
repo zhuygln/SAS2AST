@@ -139,7 +139,7 @@ The parser produces a `Program` containing typed `Step` and `Statement` nodes:
 
 **PROC statements**: `ProcSql` (SQL text per statement)
 
-**Macro nodes**: `MacroDef`, `MacroCall`, `MacroParam`, `MacroDoLoop`, `MacroDoWhile`, `MacroDoUntil`
+**Macro nodes**: `MacroDef`, `MacroCall`, `MacroParam`, `MacroLet`, `MacroPut`, `MacroDoLoop`, `MacroDoWhile`, `MacroDoUntil`
 
 **Global statements**: `Libname`, `Filename`, `Options`, `Title`, `Footnote`, `OdsStatement`, `Include`
 
@@ -168,7 +168,7 @@ All nodes inherit from `Node` and implement `to_dict()` for serialization.
 
 ### Not yet supported
 
-- Hash object syntax (`declare hash`, `defineKey`, etc.) — parsed as `UnknownStatement`
+- Hash object syntax (`declare hash`) — parsed as `UnknownStatement`. Hash method calls (`h.find()`, `h.defineKey()`) are supported in both expression and statement contexts.
 - `%sysfunc`, `%eval`, `%sysevalf` — recognized but not executed
 - `%include` file resolution — parsed as `Include` node, not expanded
 - Full SQL parsing within PROC SQL — SQL text is captured but not parsed into an AST
@@ -218,7 +218,7 @@ The HTML formatter's `format_full()` produces a combined report with:
 sas2ast/
 ├── __init__.py                 # Top-level API: parse(), analyze(), analyze_files()
 ├── _version.py                 # "0.2.1"
-├── cli.py                      # CLI entry point (parse, analyze, batch)
+├── __main__.py                 # CLI entry point (parse, analyze, batch)
 ├── common/                     # Shared infrastructure
 │   ├── tokens.py               # SASTokenizer (string/comment/CARDS-aware)
 │   ├── models.py               # DatasetRef, Location, SourceSpan

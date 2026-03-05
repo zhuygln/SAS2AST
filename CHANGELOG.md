@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-02-26
+
+### Fixed
+
+#### Documentation
+- **README.md** — Added `MacroLet` and `MacroPut` to the AST node types list. Updated hash object support description to reflect that hash method calls (`h.find()`, `h.defineKey()`) are now supported in both expression and statement contexts. Fixed project structure: `cli.py` → `__main__.py`, version `0.1.0` → `0.2.1`. Updated test count from 309 to 361.
+- **docs/prd.md** — Updated hash object out-of-scope description to reflect partial support for hash method calls. Fixed Python runtime requirement from `3.10+` to `3.8+` to match `pyproject.toml`.
+
 ## [0.2.1] - 2026-02-24
 
 ### Added

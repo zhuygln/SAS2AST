@@ -39,7 +39,7 @@
 
 ### 3.2 Out‑of‑scope (v1)
 - Execution of SAS programs (parser/AST only).
-- Hash object syntax (`declare hash`, `defineKey`, `defineData`, etc.) - parsed as `UnknownStatement` in v1.
+- Hash object declaration (`declare hash`) - parsed as `UnknownStatement` in v1. Hash method calls (`h.find()`, `h.defineKey()`) are supported in both expression and statement contexts.
 
 ***
 
@@ -236,7 +236,7 @@ All AST nodes inherit from `Node` and implement `to_dict()`.
 
 ## 5. Non‑functional requirements
 
-- **Runtime:** Python 3.10+  
+- **Runtime:** Python 3.8+
 - **Dependencies:** `arpeggio`, stdlib only  
 - **Performance:** best‑effort; correctness and coverage prioritized over speed in v1  
 - **Extensibility:** AST is versioned; minor releases only add fields/nodes, breaking changes only in major versions  
